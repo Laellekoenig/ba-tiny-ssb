@@ -19,6 +19,11 @@ class Packet:
         assert len(feed_id) == 32, "feed_id must be 32B"
         assert len(seq) == 4, "sequence number must be 4B"
         assert len(prev_mid) == 20, "previous msg_id must be 20B"
+        # make sure that payload is 48 bytes, rejected if too long
+        if len(payload) < 48:
+            # too short -> append 0s
+            missing = 48 - len(payload)
+            payload += bytes(missing)
         assert len(payload) == 48, "payload must be 48B"
 
         self.log_entry_name = self.prefix + feed_id + seq + prev_mid

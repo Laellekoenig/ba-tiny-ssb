@@ -1,13 +1,14 @@
 import hashlib
 PFX = b'tinyssb-0.0.1'
 
+
 class Packet:
 
     def __init__(self, feed_id, seq, prev):
         self.feed_id = feed_id
         self.seq = seq
         self.prev = prev
-        self.log_name = PFX + self.feed_id + self.seq.to_bytes(4,'big') + self.prev
+        self.log_name = PFX + self.feed_id + self.seq.to_bytes(4, 'big') + self.prev
         self.dmx = self._dmx(self.log_name)
         self.type = None
         self.payload = None
