@@ -1,8 +1,5 @@
-import os
 from packet import Packet
 from packet import pkt_from_bytes
-from packet import create_genesis_pkt
-from ssb_util import file_exists
 
 
 class Log:
@@ -111,56 +108,3 @@ class Log:
 
         self._append(pkt)
         return True
-
-
-def create_new_log(feed_id: bytes, payload: bytes = bytes(48),
-                   trusted_seq: int = 0, trusted_mid: bytes = None,
-                   parent_seq: int = 0, parent_fid: bytes = bytes(32)) -> Log:
-    """creates log file for new log instance with provided parameters"""
-
-    if trusted_mid is None:
-        # tinyssb convention, self-signed
-        trusted_mid = feed_id[:20]
-
-    trusted_seq = trusted_seq.to_bytes(4, "big")
-    parent_seq = parent_seq.to_bytes(4, "big")
-
-    assert len(feed_id) == 32, "feed_id must be 32B"
-    assert len(payload) <= 48, "payload may not be longer than 48B"
-    assert len(trusted_seq) == 4, "trusted seq must be 4B"
-    assert len(trusted_mid) == 20, "trusted mid must be 20B"
-    assert len(parent_seq) == 4, "parent seq must be 4B"
-    assert len(parent_fid) == 32, "parent_fid must be 32B"
-
-    pkt = create_genesis_pkt(feed_id, payload)
-
-    # create log file
-    file_name = feed_id.hex() + ".log"
-    if file_exists(file_name):
-        return None
-
-    header = bytes(12) + feed_id + parent_fid + parent_seq
-    header += trusted_seq + trusted_mid
-    header += pkt.seq + pkt.mid
-
-    assert len(header) == 128, f"header must be 128B, was {len(header)}"
-
-    # create new log file
-    with open(file_name, "wb") as f:
-        f.write(header)
-        f.write(bytes(8))
-        f.write(pkt.wire)
-
-    return Log(file_name)
-
-
-def get_logs_in_dir() -> [Log]:
-    """looks for .log files in current dir and returns list of Log instances"""
-    log_files = []
-    files = os.listdir()
-
-    for f in files:
-        if f.endswith(".log"):
-            log_files.append(f)
-
-    return [Log(fn) for fn in log_files]

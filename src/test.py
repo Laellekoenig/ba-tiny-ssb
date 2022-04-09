@@ -1,11 +1,10 @@
-import os
 from packet import Packet
 from packet import pkt_from_bytes
 from packet import create_genesis_pkt
 from packet import create_succ
 from log import Log
-from log import create_new_log
-from log import get_logs_in_dir
+from log_manager import LogManager
+from ssb_util import to_hex
 
 # PACKET TEST
 # feed_id = bytes(32)
@@ -28,10 +27,13 @@ from log import get_logs_in_dir
 # log.append_payload(b"hello 3")
 # log.append_payload(b"hello 4")
 
-logs = get_logs_in_dir()
-log = logs[0]
-print(len(log._mids))
-print(log._mids)
+# logs = get_logs_in_dir()
+# log = logs[0]
+# print(len(log._mids))
+# print(log._mids)
 
-for entry in log:
-    print(entry.payload)
+# for entry in log:
+#     print(entry.payload)
+
+lm = LogManager()
+print(len(lm))
