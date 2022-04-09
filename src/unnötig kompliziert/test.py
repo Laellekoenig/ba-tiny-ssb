@@ -30,8 +30,8 @@ from log import get_logs_in_dir
 
 logs = get_logs_in_dir()
 log = logs[0]
-print(len(log))
-print(log[1].payload)
-print(log[2].payload)
-print(log[3].payload)
-print(log[4].payload)
+print(len(log._mids))
+print(log._mids)
+
+for entry in log:
+    print(entry.payload)

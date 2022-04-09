@@ -21,8 +21,9 @@ class Log:
         self.anchor_mid = header[84:104]
         self.front_seq = int.from_bytes(header[104:108], "big")
         self.front_mid = header[108:128]
+        self._mids = self._get_mids()  # used for accessing packets quickly
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.front_seq
 
     def __del__(self):
@@ -33,30 +34,45 @@ class Log:
         if seq > self.front_seq or seq <= self.anchor_seq:
             raise IndexError
 
-        # get first packet
-        current_seq = self.anchor_seq + 1
-        self.file.seek(128)
+        relative_seq = seq - self.anchor_seq
+
+        self.file.seek(128 * relative_seq)
         raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
-        pkt = pkt_from_bytes(self.feed_id, current_seq.to_bytes(4, "big"),
-                             self.anchor_mid, raw_pkt)
+        return pkt_from_bytes(self.feed_id, seq.to_bytes(4, "big"),
+                              self._mids[relative_seq - 1], raw_pkt)
 
-        prev_mid = pkt.mid
-        # now loop over log
-        while current_seq != seq:
-            current_seq += 1
-            self.file.seek((current_seq - self.anchor_seq) * 128)
-            raw_pkt = self.file.read(128)[8:]
-            pkt = pkt_from_bytes(self.feed_id, current_seq.to_bytes(4, "big"),
-                                 prev_mid, raw_pkt)
-            prev_mid = pkt.mid
+    def __iter__(self):
+        self._n = self.anchor_seq
+        return self
 
+    def __next__(self) -> Packet:
+        self._n += 1
+        if self._n > self.front_seq:
+            raise StopIteration
+
+        pkt = self[self._n]
         return pkt
 
     def get(self, i: int) -> Packet:
         """same as __getitem__"""
         return self[i]
 
-    def _update_header(self):
+    def _get_mids(self) -> [bytes]:
+        """loops over all log entries and returns their mids in a list
+        also confirms every packet"""
+        mids = [self.feed_id[:20]]
+        # loop over all log entries and get their mids
+        # TODO: error when packet cannot be confirmed
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            self.file.seek(128 * (i - self.anchor_seq))
+            raw_pkt = self.file.read(128)[8:]
+            pkt = pkt_from_bytes(self.feed_id, i.to_bytes(4, "big"),
+                                 mids[-1], raw_pkt)
+            mids.append(pkt.mid)
+
+        return mids
+
+    def _update_header(self) -> None:
         """updates info in file with current params of class"""
         # only thing that changes: front_seq and front_mid:
         updated_info = self.front_seq.to_bytes(4, "big") + self.front_mid

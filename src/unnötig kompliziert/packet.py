@@ -98,7 +98,8 @@ def pkt_from_bytes(feed_id: bytes, seq: bytes,
     return pkt
 
 
-def create_genesis_pkt(feed_id: bytes, payload: bytes):
+def create_genesis_pkt(feed_id: bytes, payload: bytes) -> Packet:
+    """creates a 'self-signed' packet with sequence number 1"""
     if len(payload) < 48:
         payload += bytes(48 - len(payload))
     assert len(payload) <= 48, "payload of must be 48B"
@@ -107,7 +108,8 @@ def create_genesis_pkt(feed_id: bytes, payload: bytes):
     return Packet(feed_id, seq, prev_mid, payload)
 
 
-def create_succ(prev: Packet, payload: bytes) -> bytes:
+def create_succ(prev: Packet, payload: bytes) -> Packet:
+    """creates successor packet of provided packet containing given payload"""
     assert len(payload) == 48, "payload of must be 48B"
     seq = int.from_bytes(prev.seq, "big") + 1
     return Packet(prev.feed_id, (seq).to_bytes(4, "big"), prev.mid, payload)
