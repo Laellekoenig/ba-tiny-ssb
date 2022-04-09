@@ -23,9 +23,15 @@ from log import get_logs_in_dir
 
 # LOG TEST
 # feed_id = os.urandom(32)
-# print(feed_id.hex())
-# log = create_new_log(feed_id)
+# log = create_new_log(feed_id, payload=b"hello 1")
+# log.append_payload(b"hello 2")
+# log.append_payload(b"hello 3")
+# log.append_payload(b"hello 4")
+
 logs = get_logs_in_dir()
 log = logs[0]
 print(len(log))
-print(log.feed_id.hex())
+print(log[1].payload)
+print(log[2].payload)
+print(log[3].payload)
+print(log[4].payload)

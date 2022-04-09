@@ -30,15 +30,27 @@ class Log:
 
     def __getitem__(self, seq: int) -> Packet:
         """gets instance of packet class of corresponding index in feed"""
-        if seq > self.front_seq or seq < self.anchor_seq:
+        if seq > self.front_seq or seq <= self.anchor_seq:
             raise IndexError
 
-        pos = 128 * (seq - self.anchor_seq)
-        self.file.seek(pos)
-        raw_packet = self.file.read(128)
-        raw_packet = raw_packet[8:]  # cut-off reserved 8B
-        seq = seq.to_bytes(4, "big")  # transform seq number to 4B repr
-        return pkt_from_bytes(self.feed_id, seq, self.front_mid, raw_packet)
+        # get first packet
+        current_seq = self.anchor_seq + 1
+        self.file.seek(128)
+        raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
+        pkt = pkt_from_bytes(self.feed_id, current_seq.to_bytes(4, "big"),
+                             self.anchor_mid, raw_pkt)
+
+        prev_mid = pkt.mid
+        # now loop over log
+        while current_seq != seq:
+            current_seq += 1
+            self.file.seek((current_seq - self.anchor_seq) * 128)
+            raw_pkt = self.file.read(128)[8:]
+            pkt = pkt_from_bytes(self.feed_id, current_seq.to_bytes(4, "big"),
+                                 prev_mid, raw_pkt)
+            prev_mid = pkt.mid
+
+        return pkt
 
     def get(self, i: int) -> Packet:
         """same as __getitem__"""
@@ -47,17 +59,18 @@ class Log:
     def _update_header(self):
         """updates info in file with current params of class"""
         # only thing that changes: front_seq and front_mid:
-        header_tail = self.front_seq + self.front_mid
-        # go to beginning of file + 104B (parts of header that stay)
+        updated_info = self.front_seq.to_bytes(4, "big") + self.front_mid
+        assert len(updated_info) == 24, "new front seq and mid must be 24B"
+        # go to beginning of file + 104B (where front seq and mid are)
         self.file.seek(104)
-        self.file.write(header_tail)
+        self.file.write(updated_info)
         self.file.flush()
 
     def _append(self, pkt: Packet) -> None:
         """appends given packet to file"""
         # go to end of buffer and write
         self.file.seek(0, 2)
-        self.file.write(bytes(8) + pkt)  # pappend 8B reserved
+        self.file.write(bytes(8) + pkt.wire)  # pappend 8B reserved
         self.file.flush()
 
         # update header info
@@ -65,13 +78,21 @@ class Log:
         self.front_mid = pkt.mid
         self._update_header()
 
-    def append(self, content: bytes) -> bool:
-        """creates packet and appends it to the log file"""
-        pkt = pkt_from_bytes(self.feed_id, self.front_seq + 1,
-                             self.front_mid, content)
-
+    def append_pkt(self, pkt: Packet) -> bool:
+        """appends packet to the log file"""
         if pkt is None:
             return False
+        self._append(pkt)
+        return True
+
+    def append_payload(self, payload: bytes) -> bool:
+        """creates packet containing payload and appends it to log"""
+        next_seq = self.front_seq + 1
+        pkt = Packet(self.feed_id, next_seq.to_bytes(4, "big"),
+                     self.front_mid, payload)
+        if pkt is None:
+            return False
+
         self._append(pkt)
         return True
 
@@ -85,11 +106,9 @@ def create_new_log(feed_id: bytes, payload: bytes = bytes(48),
         # tinyssb convention, self-signed
         trusted_mid = feed_id[:20]
 
-    seq = (0).to_bytes(4, "big")
     trusted_seq = trusted_seq.to_bytes(4, "big")
     parent_seq = parent_seq.to_bytes(4, "big")
 
-    assert len(seq) == 4, "seq must be 4B"
     assert len(feed_id) == 32, "feed_id must be 32B"
     assert len(payload) <= 48, "payload may not be longer than 48B"
     assert len(trusted_seq) == 4, "trusted seq must be 4B"
@@ -104,16 +123,19 @@ def create_new_log(feed_id: bytes, payload: bytes = bytes(48),
     if file_exists(file_name):
         return None
 
+    header = bytes(12) + feed_id + parent_fid + parent_seq
+    header += trusted_seq + trusted_mid
+    header += pkt.seq + pkt.mid
+
+    assert len(header) == 128, f"header must be 128B, was {len(header)}"
+
     # create new log file
     with open(file_name, "wb") as f:
-        f.write(bytes(12))  # reserved
-        f.write(feed_id)
-        f.write(parent_fid)
-        f.write(parent_seq)
-        f.write(trusted_seq)
-        f.write(trusted_mid)
-        f.write(pkt.seq)
-        f.write(pkt.mid)
+        f.write(header)
+        f.write(bytes(8))
+        f.write(pkt.wire)
+
+    return Log(file_name)
 
 
 def get_logs_in_dir() -> [Log]:

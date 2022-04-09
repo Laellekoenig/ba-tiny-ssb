@@ -99,7 +99,9 @@ def pkt_from_bytes(feed_id: bytes, seq: bytes,
 
 
 def create_genesis_pkt(feed_id: bytes, payload: bytes):
-    assert len(payload) == 48, "payload of must be 48B"
+    if len(payload) < 48:
+        payload += bytes(48 - len(payload))
+    assert len(payload) <= 48, "payload of must be 48B"
     seq = (1).to_bytes(4, "big")  # seq numbers start at 1
     prev_mid = feed_id[:20]  # tiny ssb convention
     return Packet(feed_id, seq, prev_mid, payload)
