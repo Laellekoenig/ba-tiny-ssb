@@ -1,5 +1,12 @@
 from packet import Packet
 from packet import pkt_from_bytes
+from packet import make_chain
+from packet import Blob
+from packet import PacketType
+from ssb_util import to_hex
+import os
+from ssb_util import is_file
+from ssb_util import from_var_int
 
 
 class Log:
@@ -7,6 +14,7 @@ class Log:
     -> append and get packets from feed"""
 
     def __init__(self, file_name: str):
+        self.file_name = file_name
         self.file = open(file_name, "rb+")
 
         header = self.file.read(128)
@@ -28,6 +36,8 @@ class Log:
 
     def __getitem__(self, seq: int) -> Packet:
         """gets instance of packet class of corresponding index in feed"""
+        if seq < 0:
+            seq = self.front_seq + seq  # access last pkt through -1 etc
         if seq > self.front_seq or seq <= self.anchor_seq:
             raise IndexError
 
@@ -53,6 +63,16 @@ class Log:
     def get(self, i: int) -> Packet:
         """same as __getitem__"""
         return self[i]
+
+    def get_payload(self, i: int) -> bytes:
+        pkt = self[i]
+        if pkt.pkt_type == PacketType.plain48:
+            return pkt.payload
+        if pkt.pkt_type == PacketType.chain20:
+            return self.get_blob_chain(pkt)
+
+        # TODO: other pkt types
+        return None
 
     def _get_mids(self) -> [bytes]:
         """loops over all log entries and returns their mids in a list
@@ -108,3 +128,88 @@ class Log:
 
         self._append(pkt)
         return True
+
+    def append_blob(self, payload: bytes) -> bool:
+        """creates a blob-chain from the provided bytes
+        the first blob is saved as a packet of type chain20 in the log
+        the remaining blobs are saved to the blob dir"""
+        next_seq = (self.front_seq + 1).to_bytes(4, "big")
+        pkt, blobs = make_chain(self.feed_id, next_seq,
+                                self.front_mid, payload)
+
+        if pkt is None:
+            return False
+
+        self._append(pkt)
+        # save blobs
+        return self._write_blobs(blobs)
+
+    def _write_blobs(self, blobs: [Blob]) -> bool:
+        """takes a list of blobs and writes them
+        as files as defined in tinyssb protocol"""
+        # get path of _blobs folder
+        split = self.file_name.split("/")
+        path = "/".join(split[:-2]) + "_blobs/"
+
+        for blob in blobs:
+            hash_hex = to_hex(blob.signature)
+            dir_path = path + hash_hex[:2]
+            file_name = dir_path + "/" + hash_hex[2:]
+            if not is_file(dir_path):
+                print(dir_path)
+                os.mkdir(dir_path)
+            try:
+                f = open(file_name, "wb")
+                f.write(blob.wire)
+                f.close()
+            except Exception:
+                return False
+        return True
+
+    def _get_blob(self, ptr: bytes) -> Blob:
+        """reads the blob file that the provided ptr is pointing to
+        returns the blob instance of the file"""
+        # get path of _blobs folder
+        hex_hash = to_hex(ptr)
+        split = self.file_name.split("/")
+        file_name = "/".join(split[:-2]) + "_blobs/" + hex_hash[:2]
+        file_name += "/" + hex_hash[2:]
+
+        try:
+            f = open(file_name, "rb")
+            content = f.read(120)
+            f.close()
+        except Exception:
+            return None
+
+        assert len(content) == 120, "blob must be 120B"
+        return Blob(content[:100], content[100:])
+
+    def get_blob_chain(self, pkt: Packet) -> bytes:
+        """retrieves the validated blob content for a given blob header pkt"""
+        assert pkt.pkt_type == PacketType.chain20, "pkt type must be chain20"
+        size, num_bytes = from_var_int(pkt.payload)
+        ptr = pkt.payload[-20:]
+
+        blobs = []
+        while ptr != bytes(20):
+            blob = self._get_blob(ptr)
+            ptr = blob.ptr
+            blobs.append(blob)
+
+        return self._verify_chain(pkt, blobs)
+
+    def _verify_chain(self, head: Packet, blobs: [Blob]) -> bytes:
+        """verifies the authenticity of the given blob chain
+        if it is valid, the content is returned as bytes"""
+        size, num_bytes = from_var_int(head.payload)
+        ptr = head.payload[-20:]
+        content = head.payload[num_bytes:-20]
+
+        for blob in blobs:
+            if ptr != blob.signature:
+                return None
+            content += blob.payload
+            ptr = blob.ptr
+
+        return content[:size]
