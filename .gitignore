@@ -1,5 +1,6 @@
 # spacemacs
 *.~undo-tree~
+*.DS_Store
 
 # tiny-ssb
 _blobs/
