@@ -1,5 +1,5 @@
 # tinySSB implementation
-Based on [implementation by Christian Tschudin](https://github.com/tschudin/tinyssb).
+Based on the tinySSB [implementation by Christian Tschudin](https://github.com/tschudin/tinyssb).
 
 ---
 ## Documentation
