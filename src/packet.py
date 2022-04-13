@@ -4,7 +4,10 @@ from ssb_util import to_var_int
 
 
 class PacketType:
-    """enum for packet types"""
+    """
+    Enum containing different packet types
+    (as defined in tiny-ssb protocol).
+    """
 
     plain48 = bytes([0x00])  # sha256 HMAC signature, signle packet with 48B
     chain20 = bytes([0x01])  # sha256 HMAC signature, start of hash sidechain
@@ -15,8 +18,10 @@ class PacketType:
 
 
 class Blob:
-    """simple class for containing blob information
-    not used for first blob entry"""
+    """
+    Simple class for handeling blob information.
+    Not used for first blob entry (Packet).
+    """
 
     def __init__(self, payload: bytes, ptr: bytes):
         self.payload = payload
@@ -26,29 +31,37 @@ class Blob:
 
 
 class Packet:
-    """used for verifying and decoding raw bytes"""
+    """
+    Contains all the information as defined in tiny-ssb protocol.
+    Contains bytes payload and feed information.
+    The hashing and signing algorithms can be changed thorugh the
+    'hash_algo' and 'sign_algo' fields.
+    The maximum payload size of a packet is 48B.
+    """
 
     prefix = b"tiny-v01"  # len must be 8B
     hash_algo = hashlib.sha256
     sign_algo = sign
     secret = b"bad secret"
 
-    def __init__(self, feed_id: bytes, seq: bytes,
+    def __init__(self, fid: bytes, seq: bytes,
                  prev_mid: bytes, payload: bytes = bytes(48),
                  pkt_type: int = PacketType.plain48):
 
-        assert len(feed_id) == 32, "feed_id must be 32B"
+        assert len(fid) == 32, "fid must be 32B"
         assert len(seq) == 4, "sequence number must be 4B"
         assert len(prev_mid) == 20, "previous msg_id must be 20B"
         # make sure that payload is 48 bytes, rejected if too long
+        if payload is None:
+            payload = bytes(48)
         if len(payload) < 48:
             # too short -> append 0s
             missing = 48 - len(payload)
             payload += bytes(missing)
         assert len(payload) == 48, "payload must be 48B"
 
-        self.log_entry_name = self.prefix + feed_id + seq + prev_mid
-        self.feed_id = feed_id
+        self.log_entry_name = self.prefix + fid + seq + prev_mid
+        self.fid = fid
         self.seq = seq
         self.prev_mid = prev_mid
         self.payload = payload
@@ -59,7 +72,7 @@ class Packet:
         self.wire = self._get_wire()
 
     def __repr__(self):
-        s = "packet(\nfeed_id:{},\nseq:{},\n".format(self.feed_id,
+        s = "packet(\nfeed_id:{},\nseq:{},\n".format(self.fid,
                                                      self.seq)
         s += "prev_mid:{},\npayload:{},\ndmx:{}\n".format(self.prev_mid,
                                                           self.payload,
@@ -70,97 +83,163 @@ class Packet:
         return s
 
     def _calc_dmx(self) -> bytes:
-        """calculates the demultiplexing field of the packet"""
+        """
+        Calculates the demultiplexing field of the packet.
+        """
         hash_algo = self.hash_algo()
         hash_algo.update(self.log_entry_name)
         return hash_algo.digest()[:7]
 
     def next_dmx(self) -> bytes:
-        """predicts the next packet's dmx"""
+        """
+        Predicts the next packet's dmx value.
+        """
         next = self.fid + (self.seq + 1).to_bytes(4, "big") + self.mid
         return self.hash_algo(next).digest()[:20]
 
     def _expand(self) -> bytes:
-        """computes the virtual 120B expanded log entry"""
+        """
+        Computes the 128B expanded log entry containing 'virtual' information.
+        """
         return self.log_entry_name + self.dmx + self.pkt_type + self.payload
 
     def _calc_signature(self) -> bytes:
-        """calculates the signature of the packet
-        for now, HMAC is used, can be swapped out thorugh Packet.sign_algo"""
+        """
+        Computes the signature of the packet.
+        For now, sha256 HMAC using symmetric key is used.
+        Can be swapped out through 'sign_algo' field.
+        """
         return self.sign_algo(self.secret, self._expand())
 
     def _get_full(self) -> bytes:
-        """computes the virtual 184B full log entry"""
+        """
+        Computes the full 184B log entry.
+        Consists of the expanded log entry and
+        the signature of the packet.
+        """
         return self._expand() + self._calc_signature()
 
     def _calc_mid(self) -> bytes:
-        """computes the virtual 20B message id, referenced in next log"""
+        """
+        Computes the 20B message ID of the packet.
+        This message ID is referenced in the next packet.
+        """
         hash_algo = self.hash_algo()
         hash_algo.update(self._get_full())
         return hash_algo.digest()[:20]
 
     def _get_wire(self) -> bytes:
-        """returns the 120B wire format of packet
-        'missing' info can be inferred by recipient"""
+        """
+        Returns the 120B 'raw' wire format of the packet.
+        The missing 'virtual' information can be infereed by
+        the recipient using prior packets.
+        """
         return self.dmx + self.pkt_type + self.payload + self.signature
 
 
-def pkt_from_bytes(feed_id: bytes, seq: bytes,
+def pkt_from_bytes(fid: bytes, seq: bytes,
                    prev_mid: bytes, raw_pkt: bytes) -> Packet:
-    """creates a packet from the given params and confirms it
-    if can't be validated 'None' is returned"""
-
+    """
+    Creates a Packet instance from the given feed ID, sequence number
+    previous message ID and wire bytes.
+    Also validates the packet.
+    If the signatures do not match, 'None' is returned.
+    """
     assert len(raw_pkt) == 120, "raw packet length must be 120B"
     # dmx = raw_pkt[:7]
     pkt_type = raw_pkt[7:8]
     payload = raw_pkt[8:56]
     signature = raw_pkt[56:]
 
-    pkt = Packet(feed_id, seq, prev_mid, payload, pkt_type=pkt_type)
+    pkt = Packet(fid, seq, prev_mid, payload, pkt_type=pkt_type)
 
-    # now confirm packet
+    # confirm packet
     if signature != pkt.signature:
         print("packet not trusted")
         return None
     return pkt
 
 
-def create_genesis_pkt(feed_id: bytes, payload: bytes) -> Packet:
-    """creates a 'self-signed' packet with sequence number 1"""
+def create_genesis_pkt(fid: bytes, payload: bytes) -> Packet:
+    """
+    Creates and returns a 'self-signed' Packet instance
+    with sequence number of 1.
+    Also contains a payload of max 48B.
+    Used when creating new logs.
+    """
     seq = (1).to_bytes(4, "big")  # seq numbers start at 1
-    prev_mid = feed_id[:20]  # tiny ssb convention
-    return Packet(feed_id, seq, prev_mid, payload)
+    prev_mid = fid[:20]  # tiny ssb convention
+    return Packet(fid, seq, prev_mid, payload)
 
 
-def create_parent_pkt(feed_id: bytes, seq: bytes,
+def create_parent_pkt(fid: bytes, seq: bytes,
                       prev_mid: bytes, child_fid: bytes) -> Packet:
-    """creates a parent packet for given information"""
-    return Packet(feed_id, seq, prev_mid,
+    """
+    Creates and returns a packet instance of type 'mkchild'.
+    Is used in parent log, to refer to child logs.
+    No payload can be attached to this packet,
+    as it contains information about the child feed.
+    """
+    # TODO: maybe add time stamp?
+    return Packet(fid, seq, prev_mid,
                   payload=child_fid, pkt_type=PacketType.mkchild)
 
 
-def create_child_pkt(feed_id: bytes, payload: bytes) -> Packet:
-    """creates the first packet of a child feed
-    similar to regular genesis block, pkt type different"""
+def create_child_pkt(fid: bytes, payload: bytes) -> Packet:
+    """
+    Creates and returns the first packet of a new child feed.
+    Starts with sequence number 1 and has
+    packet type 'ischild'.
+    """
     seq = (1).to_bytes(4, "big")
-    prev_mid = feed_id[:20]
-    return Packet(feed_id, seq, prev_mid,
+    prev_mid = fid[:20]
+    return Packet(fid, seq, prev_mid,
                   payload, pkt_type=PacketType.ischild)
 
 
+def create_end_pkt(fid: bytes, seq: bytes,
+                   prev_mid: bytes, contn_fid: bytes) -> Packet:
+    """
+    Creates and returns the last packet of a feed.
+    Contains information of the continuing feed.
+    Has packet type 'contdas'.
+    """
+    # TODO: maybe add time stamp?
+    return Packet(fid, seq, prev_mid,
+                  payload=contn_fid, pkt_type=PacketType.contdas)
+
+
+def create_contn_pkt(fid: bytes, payload: bytes) -> Packet:
+    """
+    Creates and returns the first packet of a continuation feed.
+    Starts at sequence number 1 and has packet type 'iscontn'.
+    """
+    seq = (1).to_bytes(4, "big")
+    prev_mid = fid[:20]
+    return Packet(fid, seq, prev_mid,
+                  payload, pkt_type=PacketType.iscontn)
+
+
 def create_succ(prev: Packet, payload: bytes) -> Packet:
-    """creates successor packet of provided packet containing given payload"""
+    """
+    Creates and returns the successor of the given packet,
+    containing the given payload.
+    """
     seq = int.from_bytes(prev.seq, "big") + 1
-    return Packet(prev.feed_id, (seq).to_bytes(4, "big"), prev.mid, payload)
+    return Packet(prev.fid, (seq).to_bytes(4, "big"), prev.mid, payload)
 
 
-def make_chain(feed_id: bytes, seq: bytes, prev_mid: bytes,
-               content: bytes) -> (Packet, [Blob]):
-    """creates a blob chain for the given content and feed info
-    returns a tuple containing the first blob (as a packet)
-    and a list containing Blob instances"""
+def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
+                 content: bytes) -> (Packet, [Blob]):
+    """
+    Creates a blob chain, containing the given bytes (content).
+    The blob is returned as a tuple, containing the header of the blob
+    as a packet and a list containing Blob instances.
+    Blob instances can easily be saved as bytes by using blob.wire.
+    The blob list is empty if the content fits into the blob header.
+    """
     chain = []
-    # get size as var int and prepend to content
+    # get size as VarInt and prepend to content
     size = to_var_int(len(content))
     content = size + content
 
@@ -190,7 +269,7 @@ def make_chain(feed_id: bytes, seq: bytes, prev_mid: bytes,
     # create first pkt
     payload = header + ptr
     assert len(payload) == 48, "blob header must be 48B"
-    pkt = Packet(feed_id, seq, prev_mid,
+    pkt = Packet(fid, seq, prev_mid,
                  payload, pkt_type=PacketType.chain20)
 
     chain.reverse()

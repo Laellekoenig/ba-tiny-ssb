@@ -1,6 +1,10 @@
 # spacemacs
 *.~undo-tree~
 
+# tiny-ssb
+_blobs/
+_logs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -1,15 +1,20 @@
 import os
 from log import Log
-from packet import create_genesis_pkt
 from packet import create_child_pkt
+from packet import create_contn_pkt
+from packet import create_end_pkt
+from packet import create_parent_pkt
+from ssb_util import from_hex
 from ssb_util import is_file
 from ssb_util import to_hex
-from ssb_util import from_hex
-from packet import PacketType
-from packet import create_parent_pkt
 
 
 class LogManager:
+    """
+    Manages and creates Log instances.
+    The path can be specified in the constructor with path="path"
+    (TODO: test).
+    """
 
     def __init__(self, path: str = ""):
         self.path = path
@@ -25,16 +30,20 @@ class LogManager:
         return self.logs[i]
 
     def _check_dirs(self):
-        """checks if the log and blob dirs already exists
-        if not, new ones are created"""
+        """
+        Checks whether the _log and _blob firectories already exist.
+        If not, new directories are created.
+        """
         if not is_file(self.log_dir):
             os.mkdir(self.log_dir)
         if not is_file(self.blob_dir):
             os.mkdir(self.blob_dir)
 
     def _get_logs(self) -> [Log]:
-        """reads all the log files that are in self.log_dir
-        and returns list of all Log instances"""
+        """
+        Reads all .log files in the self.log_dir directory.
+        Returns a list of all Log instances.
+        """
         logs = []
         files = os.listdir(self.log_dir)
         for f in files:
@@ -43,84 +52,87 @@ class LogManager:
 
         return logs
 
-    def get_log(self, feed_id: bytes) -> Log:
-        """searches for specific log in self.logs
-        expects feed_id as bytes as input
-        also handles string representation and file name"""
-
+    def get_log(self, fid: bytes) -> Log:
+        """
+        Searches for a specific Log in self.logs.
+        The feed ID can be handed in as bytes, a hex string
+        or a file name.
+        Retruns 'None' if the log cannot be found.
+        """
         # transform to bytes
-        if type(feed_id) is str:
-            if feed_id.endswith(".log"):
-                feed_id = feed_id[:-4]
-            feed_id = from_hex(feed_id)
+        if type(fid) is str:
+            if fid.endswith(".log"):
+                fid = fid[:-4]
+            fid = from_hex(fid)
 
         # search
         for log in self.logs:
-            if log.feed_id == feed_id:
+            if log.fid == fid:
                 return log
 
         return None
 
     def create_new_log(self,
-                       feed_id: bytes = None,
+                       fid: bytes = None,
                        trusted_seq: int = 0,
                        trusted_mid: bytes = None,
-                       payload: bytes = bytes(48),
-                       pkt_type: PacketType = PacketType.plain48,
-                       parent_fid: bytes = bytes(32),
-                       parent_seq: int = 0) -> str:
-        """creates new log instance and adds it to 'logs' list
-        the feed_id of the log is returned as a string"""
-
-        if feed_id is None:
-            feed_id = os.urandom(32)
+                       parent_seq: int = 0,
+                       parent_fid: bytes = bytes(32)) -> Log:
+        """
+        Creates a new Log instance and adds it to self.logs.
+        The feed ID, trusted sequence number, trusted message ID,
+        parent feed ID and parent sequence number can be explicitly
+        specified.
+        If no feed ID is specified, a random one is generated.
+        Returns the newly created Log instance.
+        """
+        if fid is None:
+            fid = os.urandom(32)
 
         if trusted_mid is None:
-            # tinyssb convention, self-signed
-            trusted_mid = feed_id[:20]
+            trusted_mid = fid[:20]  # tinyssb convention, self-signed
 
         trusted_seq = trusted_seq.to_bytes(4, "big")
         parent_seq = parent_seq.to_bytes(4, "big")
 
-        assert len(feed_id) == 32, "feed_id must be 32b"
-        assert len(payload) <= 48, "payload may not be longer than 48b"
+        assert len(fid) == 32, "fid must be 32b"
         assert len(trusted_seq) == 4, "trusted seq must be 4b"
         assert len(trusted_mid) == 20, "trusted mid must be 20b"
         assert len(parent_seq) == 4, "parent seq must be 4b"
         assert len(parent_fid) == 32, "parent_fid must be 32b"
 
-        if pkt_type == PacketType.plain48:
-            pkt = create_genesis_pkt(feed_id, payload)
-        if pkt_type == PacketType.ischild:
-            pkt = create_child_pkt(feed_id, payload)
-
         # create log file
-        file_name = self.log_dir + "/" + to_hex(feed_id) + ".log"
+        file_name = self.log_dir + "/" + to_hex(fid) + ".log"
         if os.path.isfile(file_name):
             return None
 
-        header = bytes(12) + feed_id + parent_fid + parent_seq
+        header = bytes(12) + fid + parent_fid + parent_seq
         header += trusted_seq + trusted_mid
-        header += pkt.seq + pkt.mid
+        header += trusted_seq + fid[:20]  # self-signed
 
         assert len(header) == 128, f"header must be 128b, was {len(header)}"
 
         # create new log file
         with open(file_name, "wb") as f:
             f.write(header)
-            f.write(bytes(8))  # reserved 8b at start of entry
-            f.write(pkt.wire)
 
         log = Log(file_name)
         self.logs.append(log)
-        return to_hex(log.feed_id)
+        return log
 
     def create_child_log(self, parent_fid: bytes,
-                         child_fid: bytes = None) -> str:
-        """starts a child log for the given feed id
-        returns the feed id of the newly created child log"""
+                         child_fid: bytes = None) -> Log:
+        """
+        Creates and returns a new child Log instance for the given parent.
+        The parent can be passed either as a Log instance, feed ID bytes,
+        feed ID hex string or file name.
+        The child feed ID can be explicitly definied.
+        """
+        if type(parent_fid) is Log:
+            parent = parent_fid
+        else:
+            parent = self.get_log(parent_fid)
 
-        parent = self.get_log(parent_fid)
         if parent is None:
             return None
 
@@ -129,15 +141,52 @@ class LogManager:
 
         # add child info to parent
         parent_seq = (parent.front_seq + 1).to_bytes(4, "big")
-        parent_pkt = create_parent_pkt(parent.feed_id, parent_seq,
+        parent_pkt = create_parent_pkt(parent.fid, parent_seq,
                                        parent.front_mid, child_fid)
         parent.append_pkt(parent_pkt)
 
         # create child log
-        child_payload = parent_pkt.feed_id + parent_pkt.seq
+        child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
-        return self.create_new_log(child_fid,
-                                   payload=child_payload,
-                                   pkt_type=PacketType.ischild,
-                                   parent_fid=parent.feed_id,
-                                   parent_seq=parent.front_seq)
+        child_log = self.create_new_log(child_fid,
+                                        parent_fid=parent.fid,
+                                        parent_seq=parent.front_seq)
+
+        child_pkt = create_child_pkt(child_log.fid, child_payload)
+        child_log.append_pkt(child_pkt)
+        return child_log
+
+    def create_contn_log(self, end_fid: bytes,
+                         contn_fid: bytes = None) -> Log:
+        """
+        Ends the given log and returns a new continuation Log instance.
+        The ending log can be passed either as a Log instance, feed ID bytes,
+        feed ID hex string or file name.
+        The continuation feed ID can be explicitly defined.
+        """
+        if type(end_fid) is Log:
+            ending_log = end_fid
+        else:
+            ending_log = self.get_log(end_fid)
+
+        if ending_log is None:
+            return None
+
+        if contn_fid is None:
+            contn_fid = os.urandom(32)
+
+        end_seq = (ending_log.front_seq + 1).to_bytes(4, "big")
+        end_pkt = create_end_pkt(ending_log.fid, end_seq,
+                                 ending_log.front_mid, contn_fid)
+
+        ending_log.append_pkt(end_pkt)
+        # create continuing log
+        contn_payload = end_pkt.fid + end_pkt.seq
+        contn_payload += end_pkt.wire[-12:]
+        contn_log = self.create_new_log(contn_fid,
+                                        parent_fid=ending_log.fid,
+                                        parent_seq=ending_log.front_seq)
+
+        contn_pkt = create_contn_pkt(contn_log.fid, contn_payload)
+        contn_log.append_pkt(contn_pkt)
+        return contn_log

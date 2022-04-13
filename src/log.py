@@ -1,17 +1,19 @@
-from packet import Packet
-from packet import pkt_from_bytes
-from packet import make_chain
-from packet import Blob
-from packet import PacketType
-from ssb_util import to_hex
 import os
-from ssb_util import is_file
+from packet import Blob
+from packet import Packet
+from packet import PacketType
+from packet import create_chain
+from packet import pkt_from_bytes
 from ssb_util import from_var_int
+from ssb_util import is_file
+from ssb_util import to_hex
 
 
 class Log:
-    """used for managing log files
-    -> append and get packets from feed"""
+    """
+    Represents a .log file.
+    Used to get/appennd data from/to logs.
+    """
 
     def __init__(self, file_name: str):
         self.file_name = file_name
@@ -19,7 +21,7 @@ class Log:
 
         header = self.file.read(128)
         # reserved = header[:12]
-        self.feed_id = header[12:44]
+        self.fid = header[12:44]
         self.parent_id = header[44:76]
         self.parent_seq = int.from_bytes(header[76:80], "big")
         self.anchor_seq = int.from_bytes(header[80:84], "big")
@@ -35,9 +37,14 @@ class Log:
         self.file.close()
 
     def __getitem__(self, seq: int) -> Packet:
-        """gets instance of packet class of corresponding index in feed"""
+        """
+        Returns Packet instance with corresponding sequence number in feed.
+        Negative indices retrieve packets starting from
+        the latest sequence number.
+        Packets are confirmed before they are returned.
+        """
         if seq < 0:
-            seq = self.front_seq + seq  # access last pkt through -1 etc
+            seq = self.front_seq + seq + 1  # access last pkt through -1 etc.
         if seq > self.front_seq or seq <= self.anchor_seq:
             raise IndexError
 
@@ -45,7 +52,7 @@ class Log:
 
         self.file.seek(128 * relative_seq)
         raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
-        return pkt_from_bytes(self.feed_id, seq.to_bytes(4, "big"),
+        return pkt_from_bytes(self.fid, seq.to_bytes(4, "big"),
                               self._mids[relative_seq - 1], raw_pkt)
 
     def __iter__(self):
@@ -61,37 +68,81 @@ class Log:
         return pkt
 
     def get(self, i: int) -> Packet:
-        """same as __getitem__"""
+        """
+        Returns Packet instance with corresponding sequence number in feed.
+        Identical to __getitem__.
+        """
         return self[i]
 
-    def get_payload(self, i: int) -> bytes:
+    def get_bytes_quick(self, i: int) -> bytes:
+        """
+        Returns the payload of the packet with the corresponding
+        sequence number.
+        Negative indices access the log from behind.
+        The packet is NOT validated before the payload is returned.
+        This is quicker than get_bytes.
+        Does not return full blobs.
+        """
+        if i < 0:
+            i = self.front_seq + i + 1  # access last pkt through -1 etc.
+        if i > self.front_seq or i <= self.anchor_seq:
+            raise IndexError
+
+        relative_i = i - self.anchor_seq
+
+        self.file.seek(128 * relative_i)
+        raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
+        return raw_pkt[8:56]
+
+    def get_bytes(self, i: int) -> bytes:
+        """
+        Returns the packet-specific payload as bytes.
+        The packet is validated before the payload is returned.
+        """
+        """returns the packet-specific payload
+        returns full blob messages as bytes"""
+        # TODO: more packet-specific handeling
         pkt = self[i]
+        if pkt is None:
+            return None
+
         if pkt.pkt_type == PacketType.plain48:
             return pkt.payload
         if pkt.pkt_type == PacketType.chain20:
             return self.get_blob_chain(pkt)
+        if pkt.pkt_type == PacketType.ischild:
+            return pkt.payload
+        if pkt.pkt_type == PacketType.iscontn:
+            return pkt.payload
+        if pkt.pkt_type == PacketType.mkchild:
+            return pkt.payload
+        if pkt.pkt_type == PacketType.contdas:
+            return pkt.payload
 
-        # TODO: other pkt types
         return None
 
     def _get_mids(self) -> [bytes]:
-        """loops over all log entries and returns their mids in a list
-        also confirms every packet"""
-        mids = [self.feed_id[:20]]
-        # loop over all log entries and get their mids
+        """
+        Loops over all log entries and returns their message IDs as a list.
+        Used for speeding-up packet validation.
+        Confirms every packet in the log.
+        """
+        mids = [self.fid[:20]]
         # TODO: error when packet cannot be confirmed
         for i in range(self.anchor_seq + 1, self.front_seq + 1):
             self.file.seek(128 * (i - self.anchor_seq))
             raw_pkt = self.file.read(128)[8:]
-            pkt = pkt_from_bytes(self.feed_id, i.to_bytes(4, "big"),
+            pkt = pkt_from_bytes(self.fid, i.to_bytes(4, "big"),
                                  mids[-1], raw_pkt)
             mids.append(pkt.mid)
 
         return mids
 
     def _update_header(self) -> None:
-        """updates info in file with current params of class"""
-        # only thing that changes: front_seq and front_mid:
+        """
+        Updates the front sequence number and message ID in the .log file
+        with the current values of the instance.
+        """
         updated_info = self.front_seq.to_bytes(4, "big") + self.front_mid
         assert len(updated_info) == 24, "new front seq and mid must be 24B"
         # go to beginning of file + 104B (where front seq and mid are)
@@ -99,9 +150,17 @@ class Log:
         self.file.write(updated_info)
         self.file.flush()
 
-    def _append(self, pkt: Packet) -> None:
-        """appends given packet to file"""
+    def append_pkt(self, pkt: Packet) -> bool:
+        """
+        Appends given packet to .log file and updates
+        front sequence number and message ID.
+        Returns 'True' on success.
+        """
+        # TODO: better error handeling
+        if pkt is None:
+            return False
         # go to end of buffer and write
+        assert len(bytes(8) + pkt.wire) == 128, "wire pkt must be 128B"
         self.file.seek(0, 2)
         self.file.write(bytes(8) + pkt.wire)  # pappend 8B reserved
         self.file.flush()
@@ -110,43 +169,46 @@ class Log:
         self.front_seq += 1
         self.front_mid = pkt.mid
         self._update_header()
-
-    def append_pkt(self, pkt: Packet) -> bool:
-        """appends packet to the log file"""
-        if pkt is None:
-            return False
-        self._append(pkt)
+        self._mids.append(pkt.mid)
         return True
 
-    def append_payload(self, payload: bytes) -> bool:
-        """creates packet containing payload and appends it to log"""
+    def append_bytes(self, payload: bytes) -> bool:
+        """
+        Creates a regular packet containing the given payload
+        and appends it to the log.
+        Returns 'True' on success.
+        """
         next_seq = self.front_seq + 1
-        pkt = Packet(self.feed_id, next_seq.to_bytes(4, "big"),
+        pkt = Packet(self.fid, next_seq.to_bytes(4, "big"),
                      self.front_mid, payload)
         if pkt is None:
             return False
 
-        self._append(pkt)
+        self.append_pkt(pkt)
         return True
 
     def append_blob(self, payload: bytes) -> bool:
-        """creates a blob-chain from the provided bytes
-        the first blob is saved as a packet of type chain20 in the log
-        the remaining blobs are saved to the blob dir"""
+        """
+        Creates a blob from the provided payload.
+        A packet of type 'chain20' is appended to the log,
+        refering to the blob files (in _blob directory).
+        """
         next_seq = (self.front_seq + 1).to_bytes(4, "big")
-        pkt, blobs = make_chain(self.feed_id, next_seq,
-                                self.front_mid, payload)
+        pkt, blobs = create_chain(self.fid, next_seq,
+                                  self.front_mid, payload)
 
         if pkt is None:
             return False
 
-        self._append(pkt)
-        # save blobs
-        return self._write_blobs(blobs)
+        self.append_pkt(pkt)
+        return self._write_blob(blobs)
 
-    def _write_blobs(self, blobs: [Blob]) -> bool:
-        """takes a list of blobs and writes them
-        as files as defined in tinyssb protocol"""
+    def _write_blob(self, blobs: [Blob]) -> bool:
+        """
+        Takes a list of blob instances and writes them
+        to blob files, as defined in tiny-ssb protocol.
+        Returns 'True' on success.
+        """
         # get path of _blobs folder
         split = self.file_name.split("/")
         path = "/".join(split[:-2]) + "_blobs/"
@@ -156,7 +218,6 @@ class Log:
             dir_path = path + hash_hex[:2]
             file_name = dir_path + "/" + hash_hex[2:]
             if not is_file(dir_path):
-                print(dir_path)
                 os.mkdir(dir_path)
             try:
                 f = open(file_name, "wb")
@@ -167,8 +228,10 @@ class Log:
         return True
 
     def _get_blob(self, ptr: bytes) -> Blob:
-        """reads the blob file that the provided ptr is pointing to
-        returns the blob instance of the file"""
+        """
+        Creates and returns a blob instance of the
+        blob file that the given pointer is pointing to.
+        """
         # get path of _blobs folder
         hex_hash = to_hex(ptr)
         split = self.file_name.split("/")
@@ -186,7 +249,11 @@ class Log:
         return Blob(content[:100], content[100:])
 
     def get_blob_chain(self, pkt: Packet) -> bytes:
-        """retrieves the validated blob content for a given blob header pkt"""
+        """
+        Retrieves the full data that a 'chain20' packet is pointing to.
+        The content is validated.
+        If validation fails, 'None' is returned.
+        """
         assert pkt.pkt_type == PacketType.chain20, "pkt type must be chain20"
         size, num_bytes = from_var_int(pkt.payload)
         ptr = pkt.payload[-20:]
@@ -200,8 +267,10 @@ class Log:
         return self._verify_chain(pkt, blobs)
 
     def _verify_chain(self, head: Packet, blobs: [Blob]) -> bytes:
-        """verifies the authenticity of the given blob chain
-        if it is valid, the content is returned as bytes"""
+        """
+        Verifies the authenticity of a given blob chain.
+        If it is valid, the content is returned as bytes.
+        """
         size, num_bytes = from_var_int(head.payload)
         ptr = head.payload[-20:]
         content = head.payload[num_bytes:-20]
@@ -213,3 +282,63 @@ class Log:
             ptr = blob.ptr
 
         return content[:size]
+
+    def has_ended(self) -> bool:
+        """
+        Returns 'True' if the log was ended by a 'contdas' packet.
+        """
+        last_pkt = self[-1]
+        return last_pkt.pkt_type == PacketType.contdas
+
+    def get_parent(self) -> bytes:
+        """
+        Returns the feed ID of this feed's parent feed.
+        If this is not a child feed, 'None' is returned.
+        """
+        if self.anchor_seq != 0:
+            return None
+
+        first_pkt = self[1]
+        if first_pkt.pkt_type != PacketType.ischild:
+            return None
+
+        return first_pkt.payload[:32]
+
+    def get_children(self) -> [bytes]:
+        """
+        Returns a list of all child feed IDs contained
+        within this log.
+        """
+        children = []
+        for pkt in self:
+            if pkt.pkt_type == PacketType.mkchild:
+                children.append(pkt)
+
+        # extract feed ids
+        return [pkt.payload[:32] for pkt in children]
+
+    def get_contn(self) -> bytes:
+        """
+        Returns the feed ID of this log's continuation feed.
+        If this feed has not ended, 'None' is returned.
+        """
+        last_pkt = self[-1]
+        if last_pkt.pkt_type != PacketType.contdas:
+            return None
+
+        return last_pkt.payload[:32]
+
+    def get_prev(self) -> bytes:
+        """
+        Returns the feed ID of this log's predecessor feed.
+        If this feed does not have a predecessor, 'None' is returned.
+        """
+        try:
+            first_pkt = self[1]
+        except Exception:
+            return None
+
+        if first_pkt.pkt_type != PacketType.iscontn:
+            return None
+
+        return first_pkt.payload[:32]

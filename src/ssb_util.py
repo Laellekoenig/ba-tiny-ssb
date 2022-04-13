@@ -5,7 +5,12 @@ import binascii as bin
 
 
 def is_file(file_name: str) -> bool:
-    """checks whether file or dir already exists"""
+    """
+    Checks whether the given file name exists.
+    Works for directories and files.
+    Supports checking for files in subdirectories (e.g. 'example/file.txt').
+    Directory names may not end with '/'.
+    """
     dir_prefix = None
     if "/" in file_name:
         split = file_name.split("/")
@@ -16,18 +21,24 @@ def is_file(file_name: str) -> bool:
 
 
 def to_hex(b: bytes) -> str:
-    """transforms bytes to hex string representation"""
+    """
+    Returns the bytes as a hex string.
+    """
     return bin.hexlify(b).decode()
 
 
 def from_hex(s: str) -> bytes:
-    """transforms hex string to bytes"""
+    """Returns the hex string as bytes."""
     return bin.unhexlify(s.encode())
 
 
 def to_var_int(i: int) -> bytes:
-    """transforms an int into a 'Variable Integer' as used in bitcoin
-    to indicate the lengths of fields within transactions"""
+    """
+    Transforms an int into a 'Variable Integer' as used in Bitcoin.
+    Depending on the size of the int, either 1B, 3B, 5B or 9B are returned.
+    The provided int must be larger or equal to 0.
+    Used to indicate the length of a blob.
+    """
     assert i >= 0, "var int must be positive"
     if i <= 252:
         return bytes([i])
@@ -39,8 +50,11 @@ def to_var_int(i: int) -> bytes:
 
 
 def from_var_int(b: bytes) -> (int, int):
-    """transforms bytes from 'Variable Integer' format back to int
-    returns (number, number of bytes)"""
+    """
+    Transforms a 'Variable Integer' back to its int representation.
+    Returns the converted int and the number of bytes used by the VarInt
+    representation.
+    """
     assert len(b) >= 1
     head = b[0]
     if head <= 252:
