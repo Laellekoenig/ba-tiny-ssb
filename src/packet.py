@@ -60,7 +60,7 @@ class Packet:
             payload += bytes(missing)
         assert len(payload) == 48, "payload must be 48B"
 
-        self.log_entry_name = self.prefix + fid + seq + prev_mid
+        self.block_name = self.prefix + fid + seq + prev_mid
         self.fid = fid
         self.seq = seq
         self.prev_mid = prev_mid
@@ -87,7 +87,7 @@ class Packet:
         Calculates the demultiplexing field of the packet.
         """
         hash_algo = self.hash_algo()
-        hash_algo.update(self.log_entry_name)
+        hash_algo.update(self.block_name)
         return hash_algo.digest()[:7]
 
     def next_dmx(self) -> bytes:
@@ -99,9 +99,9 @@ class Packet:
 
     def _expand(self) -> bytes:
         """
-        Computes the 128B expanded log entry containing 'virtual' information.
+        Computes the 128B expanded block containing 'virtual' information.
         """
-        return self.log_entry_name + self.dmx + self.pkt_type + self.payload
+        return self.block_name + self.dmx + self.pkt_type + self.payload
 
     def _calc_signature(self) -> bytes:
         """
@@ -113,8 +113,8 @@ class Packet:
 
     def _get_full(self) -> bytes:
         """
-        Computes the full 184B log entry.
-        Consists of the expanded log entry and
+        Computes the full 184B block.
+        Consists of the expanded block and
         the signature of the packet.
         """
         return self._expand() + self._calc_signature()
@@ -165,7 +165,7 @@ def create_genesis_pkt(fid: bytes, payload: bytes) -> Packet:
     Creates and returns a 'self-signed' Packet instance
     with sequence number of 1.
     Also contains a payload of max 48B.
-    Used when creating new logs.
+    Used when creating new feeds.
     """
     seq = (1).to_bytes(4, "big")  # seq numbers start at 1
     prev_mid = fid[:20]  # tiny ssb convention
@@ -176,7 +176,7 @@ def create_parent_pkt(fid: bytes, seq: bytes,
                       prev_mid: bytes, child_fid: bytes) -> Packet:
     """
     Creates and returns a packet instance of type 'mkchild'.
-    Is used in parent log, to refer to child logs.
+    Is used in parent feed, to refer to child feed.
     No payload can be attached to this packet,
     as it contains information about the child feed.
     """
@@ -280,7 +280,7 @@ def dmx(name: bytes) -> bytes:
     """
     Calculates and returns the dmx value for the given name.
     """
-    log_entry_name = Packet.prefix + name
+    block_name = Packet.prefix + name
     hash_algo = Packet.hash_algo()
-    hash_algo.update(log_entry_name)
+    hash_algo.update(block_name)
     return hash_algo.digest()[:7]

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.10.0" />
-<title>log API documentation</title>
+<title>feed API documentation</title>
 <meta name="description" content="" />
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
@@ -19,7 +19,7 @@
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>log</code></h1>
+<h1 class="title">Module <code>feed</code></h1>
 </header>
 <section id="section-intro">
 <details class="source">
@@ -37,10 +37,10 @@ from ssb_util import is_file
 from ssb_util import to_hex
 
 
-class Log:
+class Feed:
     &#34;&#34;&#34;
     Represents a .log file.
-    Used to get/appennd data from/to logs.
+    Used to get/appennd data from/to feeds.
     &#34;&#34;&#34;
 
     def __init__(self, file_name: str):
@@ -106,7 +106,7 @@ class Log:
         &#34;&#34;&#34;
         Returns the payload of the packet with the corresponding
         sequence number.
-        Negative indices access the log from behind.
+        Negative indices access the feed from behind.
         The packet is NOT validated before the payload is returned.
         This is quicker than get_bytes.
         Does not return full blobs.
@@ -151,9 +151,10 @@ class Log:
 
     def _get_mids(self) -&gt; [bytes]:
         &#34;&#34;&#34;
-        Loops over all log entries and returns their message IDs as a list.
+        Loops over all feed entries (blocks)
+        and returns their message IDs as a list.
         Used for speeding-up packet validation.
-        Confirms every packet in the log.
+        Confirms every packet in the feed.
         &#34;&#34;&#34;
         mids = [self.fid[:20]]
         # TODO: error when packet cannot be confirmed
@@ -183,7 +184,13 @@ class Log:
         Appends given packet to .log file and updates
         front sequence number and message ID.
         Returns &#39;True&#39; on success.
+        If the feed has ended, nothing is appended and
+        False is returned.
         &#34;&#34;&#34;
+        if self.has_ended():
+            print(&#34;cannot append to finished feed&#34;)
+            return False
+
         # TODO: better error handeling
         if pkt is None:
             return False
@@ -203,8 +210,10 @@ class Log:
     def append_bytes(self, payload: bytes) -&gt; bool:
         &#34;&#34;&#34;
         Creates a regular packet containing the given payload
-        and appends it to the log.
+        and appends it to the feed.
         Returns &#39;True&#39; on success.
+        If the feed has ended, nothing is appended and
+        False is returned.
         &#34;&#34;&#34;
         next_seq = self.front_seq + 1
         pkt = Packet(self.fid, next_seq.to_bytes(4, &#34;big&#34;),
@@ -218,8 +227,10 @@ class Log:
     def append_blob(self, payload: bytes) -&gt; bool:
         &#34;&#34;&#34;
         Creates a blob from the provided payload.
-        A packet of type &#39;chain20&#39; is appended to the log,
+        A packet of type &#39;chain20&#39; is appended to the feed,
         refering to the blob files (in _blob directory).
+        If the feed has ended, nothing is appended and
+        False is returned.
         &#34;&#34;&#34;
         next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
         pkt, blobs = create_chain(self.fid, next_seq,
@@ -313,7 +324,7 @@ class Log:
 
     def has_ended(self) -&gt; bool:
         &#34;&#34;&#34;
-        Returns &#39;True&#39; if the log was ended by a &#39;contdas&#39; packet.
+        Returns &#39;True&#39; if the feed was ended by a &#39;contdas&#39; packet.
         &#34;&#34;&#34;
         last_pkt = self[-1]
         return last_pkt.pkt_type == PacketType.contdas
@@ -335,7 +346,7 @@ class Log:
     def get_children(self) -&gt; [bytes]:
         &#34;&#34;&#34;
         Returns a list of all child feed IDs contained
-        within this log.
+        within this feed.
         &#34;&#34;&#34;
         children = []
         for pkt in self:
@@ -347,7 +358,7 @@ class Log:
 
     def get_contn(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Returns the feed ID of this log&#39;s continuation feed.
+        Returns the feed ID of this feed&#39;s continuation feed.
         If this feed has not ended, &#39;None&#39; is returned.
         &#34;&#34;&#34;
         last_pkt = self[-1]
@@ -358,7 +369,7 @@ class Log:
 
     def get_prev(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Returns the feed ID of this log&#39;s predecessor feed.
+        Returns the feed ID of this feed&#39;s predecessor feed.
         If this feed does not have a predecessor, &#39;None&#39; is returned.
         &#34;&#34;&#34;
         try:
@@ -373,7 +384,7 @@ class Log:
 
     def get_front(self) -&gt; (int, bytes):
         &#34;&#34;&#34;
-        Returns this log&#39;s front sequence number and front message ID
+        Returns this feed&#39;s front sequence number and front message ID
         in a tuple.
         &#34;&#34;&#34;
         return (self.front_seq, self.front_mid)</code></pre>
@@ -388,21 +399,21 @@ class Log:
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt id="log.Log"><code class="flex name class">
-<span>class <span class="ident">Log</span></span>
+<dt id="feed.Feed"><code class="flex name class">
+<span>class <span class="ident">Feed</span></span>
 <span>(</span><span>file_name: str)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Represents a .log file.
-Used to get/appennd data from/to logs.</p></div>
+Used to get/appennd data from/to feeds.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Log:
+<pre><code class="python">class Feed:
     &#34;&#34;&#34;
     Represents a .log file.
-    Used to get/appennd data from/to logs.
+    Used to get/appennd data from/to feeds.
     &#34;&#34;&#34;
 
     def __init__(self, file_name: str):
@@ -468,7 +479,7 @@ Used to get/appennd data from/to logs.</p></div>
         &#34;&#34;&#34;
         Returns the payload of the packet with the corresponding
         sequence number.
-        Negative indices access the log from behind.
+        Negative indices access the feed from behind.
         The packet is NOT validated before the payload is returned.
         This is quicker than get_bytes.
         Does not return full blobs.
@@ -513,9 +524,10 @@ Used to get/appennd data from/to logs.</p></div>
 
     def _get_mids(self) -&gt; [bytes]:
         &#34;&#34;&#34;
-        Loops over all log entries and returns their message IDs as a list.
+        Loops over all feed entries (blocks)
+        and returns their message IDs as a list.
         Used for speeding-up packet validation.
-        Confirms every packet in the log.
+        Confirms every packet in the feed.
         &#34;&#34;&#34;
         mids = [self.fid[:20]]
         # TODO: error when packet cannot be confirmed
@@ -545,7 +557,13 @@ Used to get/appennd data from/to logs.</p></div>
         Appends given packet to .log file and updates
         front sequence number and message ID.
         Returns &#39;True&#39; on success.
+        If the feed has ended, nothing is appended and
+        False is returned.
         &#34;&#34;&#34;
+        if self.has_ended():
+            print(&#34;cannot append to finished feed&#34;)
+            return False
+
         # TODO: better error handeling
         if pkt is None:
             return False
@@ -565,8 +583,10 @@ Used to get/appennd data from/to logs.</p></div>
     def append_bytes(self, payload: bytes) -&gt; bool:
         &#34;&#34;&#34;
         Creates a regular packet containing the given payload
-        and appends it to the log.
+        and appends it to the feed.
         Returns &#39;True&#39; on success.
+        If the feed has ended, nothing is appended and
+        False is returned.
         &#34;&#34;&#34;
         next_seq = self.front_seq + 1
         pkt = Packet(self.fid, next_seq.to_bytes(4, &#34;big&#34;),
@@ -580,8 +600,10 @@ Used to get/appennd data from/to logs.</p></div>
     def append_blob(self, payload: bytes) -&gt; bool:
         &#34;&#34;&#34;
         Creates a blob from the provided payload.
-        A packet of type &#39;chain20&#39; is appended to the log,
+        A packet of type &#39;chain20&#39; is appended to the feed,
         refering to the blob files (in _blob directory).
+        If the feed has ended, nothing is appended and
+        False is returned.
         &#34;&#34;&#34;
         next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
         pkt, blobs = create_chain(self.fid, next_seq,
@@ -675,7 +697,7 @@ Used to get/appennd data from/to logs.</p></div>
 
     def has_ended(self) -&gt; bool:
         &#34;&#34;&#34;
-        Returns &#39;True&#39; if the log was ended by a &#39;contdas&#39; packet.
+        Returns &#39;True&#39; if the feed was ended by a &#39;contdas&#39; packet.
         &#34;&#34;&#34;
         last_pkt = self[-1]
         return last_pkt.pkt_type == PacketType.contdas
@@ -697,7 +719,7 @@ Used to get/appennd data from/to logs.</p></div>
     def get_children(self) -&gt; [bytes]:
         &#34;&#34;&#34;
         Returns a list of all child feed IDs contained
-        within this log.
+        within this feed.
         &#34;&#34;&#34;
         children = []
         for pkt in self:
@@ -709,7 +731,7 @@ Used to get/appennd data from/to logs.</p></div>
 
     def get_contn(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Returns the feed ID of this log&#39;s continuation feed.
+        Returns the feed ID of this feed&#39;s continuation feed.
         If this feed has not ended, &#39;None&#39; is returned.
         &#34;&#34;&#34;
         last_pkt = self[-1]
@@ -720,7 +742,7 @@ Used to get/appennd data from/to logs.</p></div>
 
     def get_prev(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Returns the feed ID of this log&#39;s predecessor feed.
+        Returns the feed ID of this feed&#39;s predecessor feed.
         If this feed does not have a predecessor, &#39;None&#39; is returned.
         &#34;&#34;&#34;
         try:
@@ -735,20 +757,22 @@ Used to get/appennd data from/to logs.</p></div>
 
     def get_front(self) -&gt; (int, bytes):
         &#34;&#34;&#34;
-        Returns this log&#39;s front sequence number and front message ID
+        Returns this feed&#39;s front sequence number and front message ID
         in a tuple.
         &#34;&#34;&#34;
         return (self.front_seq, self.front_mid)</code></pre>
 </details>
 <h3>Methods</h3>
 <dl>
-<dt id="log.Log.append_blob"><code class="name flex">
+<dt id="feed.Feed.append_blob"><code class="name flex">
 <span>def <span class="ident">append_blob</span></span>(<span>self, payload: bytes) ‑> bool</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates a blob from the provided payload.
-A packet of type 'chain20' is appended to the log,
-refering to the blob files (in _blob directory).</p></div>
+A packet of type 'chain20' is appended to the feed,
+refering to the blob files (in _blob directory).
+If the feed has ended, nothing is appended and
+False is returned.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -756,8 +780,10 @@ refering to the blob files (in _blob directory).</p></div>
 <pre><code class="python">def append_blob(self, payload: bytes) -&gt; bool:
     &#34;&#34;&#34;
     Creates a blob from the provided payload.
-    A packet of type &#39;chain20&#39; is appended to the log,
+    A packet of type &#39;chain20&#39; is appended to the feed,
     refering to the blob files (in _blob directory).
+    If the feed has ended, nothing is appended and
+    False is returned.
     &#34;&#34;&#34;
     next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
     pkt, blobs = create_chain(self.fid, next_seq,
@@ -770,13 +796,15 @@ refering to the blob files (in _blob directory).</p></div>
     return self._write_blob(blobs)</code></pre>
 </details>
 </dd>
-<dt id="log.Log.append_bytes"><code class="name flex">
+<dt id="feed.Feed.append_bytes"><code class="name flex">
 <span>def <span class="ident">append_bytes</span></span>(<span>self, payload: bytes) ‑> bool</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates a regular packet containing the given payload
-and appends it to the log.
-Returns 'True' on success.</p></div>
+and appends it to the feed.
+Returns 'True' on success.
+If the feed has ended, nothing is appended and
+False is returned.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -784,8 +812,10 @@ Returns 'True' on success.</p></div>
 <pre><code class="python">def append_bytes(self, payload: bytes) -&gt; bool:
     &#34;&#34;&#34;
     Creates a regular packet containing the given payload
-    and appends it to the log.
+    and appends it to the feed.
     Returns &#39;True&#39; on success.
+    If the feed has ended, nothing is appended and
+    False is returned.
     &#34;&#34;&#34;
     next_seq = self.front_seq + 1
     pkt = Packet(self.fid, next_seq.to_bytes(4, &#34;big&#34;),
@@ -797,13 +827,15 @@ Returns 'True' on success.</p></div>
     return True</code></pre>
 </details>
 </dd>
-<dt id="log.Log.append_pkt"><code class="name flex">
+<dt id="feed.Feed.append_pkt"><code class="name flex">
 <span>def <span class="ident">append_pkt</span></span>(<span>self, pkt: packet.Packet) ‑> bool</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Appends given packet to .log file and updates
 front sequence number and message ID.
-Returns 'True' on success.</p></div>
+Returns 'True' on success.
+If the feed has ended, nothing is appended and
+False is returned.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -813,7 +845,13 @@ Returns 'True' on success.</p></div>
     Appends given packet to .log file and updates
     front sequence number and message ID.
     Returns &#39;True&#39; on success.
+    If the feed has ended, nothing is appended and
+    False is returned.
     &#34;&#34;&#34;
+    if self.has_ended():
+        print(&#34;cannot append to finished feed&#34;)
+        return False
+
     # TODO: better error handeling
     if pkt is None:
         return False
@@ -831,7 +869,7 @@ Returns 'True' on success.</p></div>
     return True</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get"><code class="name flex">
+<dt id="feed.Feed.get"><code class="name flex">
 <span>def <span class="ident">get</span></span>(<span>self, i: int) ‑> packet.Packet</span>
 </code></dt>
 <dd>
@@ -849,7 +887,7 @@ Identical to <strong>getitem</strong>.</p></div>
     return self[i]</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_blob_chain"><code class="name flex">
+<dt id="feed.Feed.get_blob_chain"><code class="name flex">
 <span>def <span class="ident">get_blob_chain</span></span>(<span>self, pkt: packet.Packet) ‑> bytes</span>
 </code></dt>
 <dd>
@@ -879,7 +917,7 @@ If validation fails, 'None' is returned.</p></div>
     return self._verify_chain(pkt, blobs)</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_bytes"><code class="name flex">
+<dt id="feed.Feed.get_bytes"><code class="name flex">
 <span>def <span class="ident">get_bytes</span></span>(<span>self, i: int) ‑> bytes</span>
 </code></dt>
 <dd>
@@ -917,13 +955,13 @@ The packet is validated before the payload is returned.</p></div>
     return None</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_bytes_quick"><code class="name flex">
+<dt id="feed.Feed.get_bytes_quick"><code class="name flex">
 <span>def <span class="ident">get_bytes_quick</span></span>(<span>self, i: int) ‑> bytes</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Returns the payload of the packet with the corresponding
 sequence number.
-Negative indices access the log from behind.
+Negative indices access the feed from behind.
 The packet is NOT validated before the payload is returned.
 This is quicker than get_bytes.
 Does not return full blobs.</p></div>
@@ -935,7 +973,7 @@ Does not return full blobs.</p></div>
     &#34;&#34;&#34;
     Returns the payload of the packet with the corresponding
     sequence number.
-    Negative indices access the log from behind.
+    Negative indices access the feed from behind.
     The packet is NOT validated before the payload is returned.
     This is quicker than get_bytes.
     Does not return full blobs.
@@ -952,12 +990,12 @@ Does not return full blobs.</p></div>
     return raw_pkt[8:56]</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_children"><code class="name flex">
+<dt id="feed.Feed.get_children"><code class="name flex">
 <span>def <span class="ident">get_children</span></span>(<span>self) ‑> [<class 'bytes'>]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Returns a list of all child feed IDs contained
-within this log.</p></div>
+within this feed.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -965,7 +1003,7 @@ within this log.</p></div>
 <pre><code class="python">def get_children(self) -&gt; [bytes]:
     &#34;&#34;&#34;
     Returns a list of all child feed IDs contained
-    within this log.
+    within this feed.
     &#34;&#34;&#34;
     children = []
     for pkt in self:
@@ -976,11 +1014,11 @@ within this log.</p></div>
     return [pkt.payload[:32] for pkt in children]</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_contn"><code class="name flex">
+<dt id="feed.Feed.get_contn"><code class="name flex">
 <span>def <span class="ident">get_contn</span></span>(<span>self) ‑> bytes</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns the feed ID of this log's continuation feed.
+<div class="desc"><p>Returns the feed ID of this feed's continuation feed.
 If this feed has not ended, 'None' is returned.</p></div>
 <details class="source">
 <summary>
@@ -988,7 +1026,7 @@ If this feed has not ended, 'None' is returned.</p></div>
 </summary>
 <pre><code class="python">def get_contn(self) -&gt; bytes:
     &#34;&#34;&#34;
-    Returns the feed ID of this log&#39;s continuation feed.
+    Returns the feed ID of this feed&#39;s continuation feed.
     If this feed has not ended, &#39;None&#39; is returned.
     &#34;&#34;&#34;
     last_pkt = self[-1]
@@ -998,11 +1036,11 @@ If this feed has not ended, 'None' is returned.</p></div>
     return last_pkt.payload[:32]</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_front"><code class="name flex">
+<dt id="feed.Feed.get_front"><code class="name flex">
 <span>def <span class="ident">get_front</span></span>(<span>self) ‑> (<class 'int'>, <class 'bytes'>)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns this log's front sequence number and front message ID
+<div class="desc"><p>Returns this feed's front sequence number and front message ID
 in a tuple.</p></div>
 <details class="source">
 <summary>
@@ -1010,13 +1048,13 @@ in a tuple.</p></div>
 </summary>
 <pre><code class="python">def get_front(self) -&gt; (int, bytes):
     &#34;&#34;&#34;
-    Returns this log&#39;s front sequence number and front message ID
+    Returns this feed&#39;s front sequence number and front message ID
     in a tuple.
     &#34;&#34;&#34;
     return (self.front_seq, self.front_mid)</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_parent"><code class="name flex">
+<dt id="feed.Feed.get_parent"><code class="name flex">
 <span>def <span class="ident">get_parent</span></span>(<span>self) ‑> bytes</span>
 </code></dt>
 <dd>
@@ -1041,11 +1079,11 @@ If this is not a child feed, 'None' is returned.</p></div>
     return first_pkt.payload[:32]</code></pre>
 </details>
 </dd>
-<dt id="log.Log.get_prev"><code class="name flex">
+<dt id="feed.Feed.get_prev"><code class="name flex">
 <span>def <span class="ident">get_prev</span></span>(<span>self) ‑> bytes</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns the feed ID of this log's predecessor feed.
+<div class="desc"><p>Returns the feed ID of this feed's predecessor feed.
 If this feed does not have a predecessor, 'None' is returned.</p></div>
 <details class="source">
 <summary>
@@ -1053,7 +1091,7 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
 </summary>
 <pre><code class="python">def get_prev(self) -&gt; bytes:
     &#34;&#34;&#34;
-    Returns the feed ID of this log&#39;s predecessor feed.
+    Returns the feed ID of this feed&#39;s predecessor feed.
     If this feed does not have a predecessor, &#39;None&#39; is returned.
     &#34;&#34;&#34;
     try:
@@ -1067,18 +1105,18 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
     return first_pkt.payload[:32]</code></pre>
 </details>
 </dd>
-<dt id="log.Log.has_ended"><code class="name flex">
+<dt id="feed.Feed.has_ended"><code class="name flex">
 <span>def <span class="ident">has_ended</span></span>(<span>self) ‑> bool</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns 'True' if the log was ended by a 'contdas' packet.</p></div>
+<div class="desc"><p>Returns 'True' if the feed was ended by a 'contdas' packet.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def has_ended(self) -&gt; bool:
     &#34;&#34;&#34;
-    Returns &#39;True&#39; if the log was ended by a &#39;contdas&#39; packet.
+    Returns &#39;True&#39; if the feed was ended by a &#39;contdas&#39; packet.
     &#34;&#34;&#34;
     last_pkt = self[-1]
     return last_pkt.pkt_type == PacketType.contdas</code></pre>
@@ -1098,21 +1136,21 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
-<h4><code><a title="log.Log" href="#log.Log">Log</a></code></h4>
+<h4><code><a title="feed.Feed" href="#feed.Feed">Feed</a></code></h4>
 <ul class="two-column">
-<li><code><a title="log.Log.append_blob" href="#log.Log.append_blob">append_blob</a></code></li>
-<li><code><a title="log.Log.append_bytes" href="#log.Log.append_bytes">append_bytes</a></code></li>
-<li><code><a title="log.Log.append_pkt" href="#log.Log.append_pkt">append_pkt</a></code></li>
-<li><code><a title="log.Log.get" href="#log.Log.get">get</a></code></li>
-<li><code><a title="log.Log.get_blob_chain" href="#log.Log.get_blob_chain">get_blob_chain</a></code></li>
-<li><code><a title="log.Log.get_bytes" href="#log.Log.get_bytes">get_bytes</a></code></li>
-<li><code><a title="log.Log.get_bytes_quick" href="#log.Log.get_bytes_quick">get_bytes_quick</a></code></li>
-<li><code><a title="log.Log.get_children" href="#log.Log.get_children">get_children</a></code></li>
-<li><code><a title="log.Log.get_contn" href="#log.Log.get_contn">get_contn</a></code></li>
-<li><code><a title="log.Log.get_front" href="#log.Log.get_front">get_front</a></code></li>
-<li><code><a title="log.Log.get_parent" href="#log.Log.get_parent">get_parent</a></code></li>
-<li><code><a title="log.Log.get_prev" href="#log.Log.get_prev">get_prev</a></code></li>
-<li><code><a title="log.Log.has_ended" href="#log.Log.has_ended">has_ended</a></code></li>
+<li><code><a title="feed.Feed.append_blob" href="#feed.Feed.append_blob">append_blob</a></code></li>
+<li><code><a title="feed.Feed.append_bytes" href="#feed.Feed.append_bytes">append_bytes</a></code></li>
+<li><code><a title="feed.Feed.append_pkt" href="#feed.Feed.append_pkt">append_pkt</a></code></li>
+<li><code><a title="feed.Feed.get" href="#feed.Feed.get">get</a></code></li>
+<li><code><a title="feed.Feed.get_blob_chain" href="#feed.Feed.get_blob_chain">get_blob_chain</a></code></li>
+<li><code><a title="feed.Feed.get_bytes" href="#feed.Feed.get_bytes">get_bytes</a></code></li>
+<li><code><a title="feed.Feed.get_bytes_quick" href="#feed.Feed.get_bytes_quick">get_bytes_quick</a></code></li>
+<li><code><a title="feed.Feed.get_children" href="#feed.Feed.get_children">get_children</a></code></li>
+<li><code><a title="feed.Feed.get_contn" href="#feed.Feed.get_contn">get_contn</a></code></li>
+<li><code><a title="feed.Feed.get_front" href="#feed.Feed.get_front">get_front</a></code></li>
+<li><code><a title="feed.Feed.get_parent" href="#feed.Feed.get_parent">get_parent</a></code></li>
+<li><code><a title="feed.Feed.get_prev" href="#feed.Feed.get_prev">get_prev</a></code></li>
+<li><code><a title="feed.Feed.has_ended" href="#feed.Feed.has_ended">has_ended</a></code></li>
 </ul>
 </li>
 </ul>

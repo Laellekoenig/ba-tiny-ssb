@@ -9,10 +9,10 @@ from ssb_util import is_file
 from ssb_util import to_hex
 
 
-class Log:
+class Feed:
     """
     Represents a .log file.
-    Used to get/appennd data from/to logs.
+    Used to get/appennd data from/to feeds.
     """
 
     def __init__(self, file_name: str):
@@ -78,7 +78,7 @@ class Log:
         """
         Returns the payload of the packet with the corresponding
         sequence number.
-        Negative indices access the log from behind.
+        Negative indices access the feed from behind.
         The packet is NOT validated before the payload is returned.
         This is quicker than get_bytes.
         Does not return full blobs.
@@ -123,9 +123,10 @@ class Log:
 
     def _get_mids(self) -> [bytes]:
         """
-        Loops over all log entries and returns their message IDs as a list.
+        Loops over all feed entries (blocks)
+        and returns their message IDs as a list.
         Used for speeding-up packet validation.
-        Confirms every packet in the log.
+        Confirms every packet in the feed.
         """
         mids = [self.fid[:20]]
         # TODO: error when packet cannot be confirmed
@@ -155,7 +156,13 @@ class Log:
         Appends given packet to .log file and updates
         front sequence number and message ID.
         Returns 'True' on success.
+        If the feed has ended, nothing is appended and
+        False is returned.
         """
+        if self.has_ended():
+            print("cannot append to finished feed")
+            return False
+
         # TODO: better error handeling
         if pkt is None:
             return False
@@ -175,8 +182,10 @@ class Log:
     def append_bytes(self, payload: bytes) -> bool:
         """
         Creates a regular packet containing the given payload
-        and appends it to the log.
+        and appends it to the feed.
         Returns 'True' on success.
+        If the feed has ended, nothing is appended and
+        False is returned.
         """
         next_seq = self.front_seq + 1
         pkt = Packet(self.fid, next_seq.to_bytes(4, "big"),
@@ -190,8 +199,10 @@ class Log:
     def append_blob(self, payload: bytes) -> bool:
         """
         Creates a blob from the provided payload.
-        A packet of type 'chain20' is appended to the log,
+        A packet of type 'chain20' is appended to the feed,
         refering to the blob files (in _blob directory).
+        If the feed has ended, nothing is appended and
+        False is returned.
         """
         next_seq = (self.front_seq + 1).to_bytes(4, "big")
         pkt, blobs = create_chain(self.fid, next_seq,
@@ -285,7 +296,7 @@ class Log:
 
     def has_ended(self) -> bool:
         """
-        Returns 'True' if the log was ended by a 'contdas' packet.
+        Returns 'True' if the feed was ended by a 'contdas' packet.
         """
         last_pkt = self[-1]
         return last_pkt.pkt_type == PacketType.contdas
@@ -307,7 +318,7 @@ class Log:
     def get_children(self) -> [bytes]:
         """
         Returns a list of all child feed IDs contained
-        within this log.
+        within this feed.
         """
         children = []
         for pkt in self:
@@ -319,7 +330,7 @@ class Log:
 
     def get_contn(self) -> bytes:
         """
-        Returns the feed ID of this log's continuation feed.
+        Returns the feed ID of this feed's continuation feed.
         If this feed has not ended, 'None' is returned.
         """
         last_pkt = self[-1]
@@ -330,7 +341,7 @@ class Log:
 
     def get_prev(self) -> bytes:
         """
-        Returns the feed ID of this log's predecessor feed.
+        Returns the feed ID of this feed's predecessor feed.
         If this feed does not have a predecessor, 'None' is returned.
         """
         try:
@@ -345,7 +356,7 @@ class Log:
 
     def get_front(self) -> (int, bytes):
         """
-        Returns this log's front sequence number and front message ID
+        Returns this feed's front sequence number and front message ID
         in a tuple.
         """
         return (self.front_seq, self.front_mid)

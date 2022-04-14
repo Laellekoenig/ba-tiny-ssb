@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.10.0" />
-<title>log_manager API documentation</title>
+<title>feed_manager API documentation</title>
 <meta name="description" content="" />
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
@@ -19,7 +19,7 @@
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>log_manager</code></h1>
+<h1 class="title">Module <code>feed_manager</code></h1>
 </header>
 <section id="section-intro">
 <details class="source">
@@ -27,7 +27,7 @@
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">import os
-from log import Log
+from feed import Feed
 from packet import create_child_pkt
 from packet import create_contn_pkt
 from packet import create_end_pkt
@@ -37,55 +37,55 @@ from ssb_util import is_file
 from ssb_util import to_hex
 
 
-class LogManager:
+class FeedManager:
     &#34;&#34;&#34;
-    Manages and creates Log instances.
+    Manages and creates Feed instances.
     The path can be specified in the constructor with path=&#34;path&#34;
     (TODO: test).
     &#34;&#34;&#34;
 
     def __init__(self, path: str = &#34;&#34;):
         self.path = path
-        self.log_dir = self.path + &#34;_logs&#34;
+        self.feed_dir = self.path + &#34;_logs&#34;
         self.blob_dir = self.path + &#34;_blobs&#34;
         self._check_dirs()
-        self.logs = self._get_logs()
+        self.feeds = self._get_feeds()
 
     def __len__(self):
-        return len(self.logs)
+        return len(self.feeds)
 
-    def __getitem__(self, i: int) -&gt; Log:
-        return self.logs[i]
+    def __getitem__(self, i: int) -&gt; Feed:
+        return self.feeds[i]
 
     def _check_dirs(self):
         &#34;&#34;&#34;
         Checks whether the _log and _blob firectories already exist.
         If not, new directories are created.
         &#34;&#34;&#34;
-        if not is_file(self.log_dir):
-            os.mkdir(self.log_dir)
+        if not is_file(self.feed_dir):
+            os.mkdir(self.feed_dir)
         if not is_file(self.blob_dir):
             os.mkdir(self.blob_dir)
 
-    def _get_logs(self) -&gt; [Log]:
+    def _get_feeds(self) -&gt; [Feed]:
         &#34;&#34;&#34;
-        Reads all .log files in the self.log_dir directory.
-        Returns a list of all Log instances.
+        Reads all .log files in the self.feed_dir directory.
+        Returns a list of all Feed instances.
         &#34;&#34;&#34;
-        logs = []
-        files = os.listdir(self.log_dir)
+        feeds = []
+        files = os.listdir(self.feed_dir)
         for f in files:
             if f.endswith(&#34;.log&#34;):
-                logs.append(Log(self.log_dir + &#34;/&#34; + f))
+                feeds.append(Feed(self.feed_dir + &#34;/&#34; + f))
 
-        return logs
+        return feeds
 
-    def get_log(self, fid: bytes) -&gt; Log:
+    def get_feed(self, fid: bytes) -&gt; Feed:
         &#34;&#34;&#34;
-        Searches for a specific Log in self.logs.
+        Searches for a specific Feed in self.feeds.
         The feed ID can be handed in as bytes, a hex string
         or a file name.
-        Retruns &#39;None&#39; if the log cannot be found.
+        Retruns &#39;None&#39; if the feed cannot be found.
         &#34;&#34;&#34;
         # transform to bytes
         if type(fid) is str:
@@ -94,25 +94,25 @@ class LogManager:
             fid = from_hex(fid)
 
         # search
-        for log in self.logs:
-            if log.fid == fid:
-                return log
+        for feed in self.feeds:
+            if feed.fid == fid:
+                return feed
 
         return None
 
-    def create_new_log(self,
-                       fid: bytes = None,
-                       trusted_seq: int = 0,
-                       trusted_mid: bytes = None,
-                       parent_seq: int = 0,
-                       parent_fid: bytes = bytes(32)) -&gt; Log:
+    def create_new_feed(self,
+                        fid: bytes = None,
+                        trusted_seq: int = 0,
+                        trusted_mid: bytes = None,
+                        parent_seq: int = 0,
+                        parent_fid: bytes = bytes(32)) -&gt; Feed:
         &#34;&#34;&#34;
-        Creates a new Log instance and adds it to self.logs.
+        Creates a new Feed instance and adds it to self.feeds.
         The feed ID, trusted sequence number, trusted message ID,
         parent feed ID and parent sequence number can be explicitly
         specified.
         If no feed ID is specified, a random one is generated.
-        Returns the newly created Log instance.
+        Returns the newly created Feed instance.
         &#34;&#34;&#34;
         if fid is None:
             fid = os.urandom(32)
@@ -130,7 +130,7 @@ class LogManager:
         assert len(parent_fid) == 32, &#34;parent_fid must be 32b&#34;
 
         # create log file
-        file_name = self.log_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
+        file_name = self.feed_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
         if os.path.isfile(file_name):
             return None
 
@@ -144,22 +144,22 @@ class LogManager:
         with open(file_name, &#34;wb&#34;) as f:
             f.write(header)
 
-        log = Log(file_name)
-        self.logs.append(log)
-        return log
+        feed = Feed(file_name)
+        self.feeds.append(feed)
+        return feed
 
-    def create_child_log(self, parent_fid: bytes,
-                         child_fid: bytes = None) -&gt; Log:
+    def create_child_feed(self, parent_fid: bytes,
+                          child_fid: bytes = None) -&gt; Feed:
         &#34;&#34;&#34;
-        Creates and returns a new child Log instance for the given parent.
-        The parent can be passed either as a Log instance, feed ID bytes,
+        Creates and returns a new child Feed instance for the given parent.
+        The parent can be passed either as a Feed instance, feed ID bytes,
         feed ID hex string or file name.
         The child feed ID can be explicitly definied.
         &#34;&#34;&#34;
-        if type(parent_fid) is Log:
+        if type(parent_fid) is Feed:
             parent = parent_fid
         else:
-            parent = self.get_log(parent_fid)
+            parent = self.get_feed(parent_fid)
 
         if parent is None:
             return None
@@ -173,51 +173,51 @@ class LogManager:
                                        parent.front_mid, child_fid)
         parent.append_pkt(parent_pkt)
 
-        # create child log
+        # create child feed
         child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
-        child_log = self.create_new_log(child_fid,
-                                        parent_fid=parent.fid,
-                                        parent_seq=parent.front_seq)
+        child_feed = self.create_new_feed(child_fid,
+                                          parent_fid=parent.fid,
+                                          parent_seq=parent.front_seq)
 
-        child_pkt = create_child_pkt(child_log.fid, child_payload)
-        child_log.append_pkt(child_pkt)
-        return child_log
+        child_pkt = create_child_pkt(child_feed.fid, child_payload)
+        child_feed.append_pkt(child_pkt)
+        return child_feed
 
-    def create_contn_log(self, end_fid: bytes,
-                         contn_fid: bytes = None) -&gt; Log:
+    def create_contn_feed(self, end_fid: bytes,
+                          contn_fid: bytes = None) -&gt; Feed:
         &#34;&#34;&#34;
-        Ends the given log and returns a new continuation Log instance.
-        The ending log can be passed either as a Log instance, feed ID bytes,
+        Ends the given feed and returns a new continuation Feed instance.
+        The ending feed can be passed either as a Feed instance, feed ID bytes,
         feed ID hex string or file name.
         The continuation feed ID can be explicitly defined.
         &#34;&#34;&#34;
-        if type(end_fid) is Log:
-            ending_log = end_fid
+        if type(end_fid) is Feed:
+            ending_feed = end_fid
         else:
-            ending_log = self.get_log(end_fid)
+            ending_feed = self.get_feed(end_fid)
 
-        if ending_log is None:
+        if ending_feed is None:
             return None
 
         if contn_fid is None:
             contn_fid = os.urandom(32)
 
-        end_seq = (ending_log.front_seq + 1).to_bytes(4, &#34;big&#34;)
-        end_pkt = create_end_pkt(ending_log.fid, end_seq,
-                                 ending_log.front_mid, contn_fid)
+        end_seq = (ending_feed.front_seq + 1).to_bytes(4, &#34;big&#34;)
+        end_pkt = create_end_pkt(ending_feed.fid, end_seq,
+                                 ending_feed.front_mid, contn_fid)
 
-        ending_log.append_pkt(end_pkt)
-        # create continuing log
+        ending_feed.append_pkt(end_pkt)
+        # create continuing feed
         contn_payload = end_pkt.fid + end_pkt.seq
         contn_payload += end_pkt.wire[-12:]
-        contn_log = self.create_new_log(contn_fid,
-                                        parent_fid=ending_log.fid,
-                                        parent_seq=ending_log.front_seq)
+        contn_feed = self.create_new_feed(contn_fid,
+                                          parent_fid=ending_feed.fid,
+                                          parent_seq=ending_feed.front_seq)
 
-        contn_pkt = create_contn_pkt(contn_log.fid, contn_payload)
-        contn_log.append(contn_pkt)
-        return contn_log</code></pre>
+        contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload)
+        contn_feed.append_pkt(contn_pkt)
+        return contn_feed</code></pre>
 </details>
 </section>
 <section>
@@ -229,67 +229,67 @@ class LogManager:
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt id="log_manager.LogManager"><code class="flex name class">
-<span>class <span class="ident">LogManager</span></span>
+<dt id="feed_manager.FeedManager"><code class="flex name class">
+<span>class <span class="ident">FeedManager</span></span>
 <span>(</span><span>path: str = '')</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Manages and creates Log instances.
+<div class="desc"><p>Manages and creates Feed instances.
 The path can be specified in the constructor with path="path"
 (TODO: test).</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class LogManager:
+<pre><code class="python">class FeedManager:
     &#34;&#34;&#34;
-    Manages and creates Log instances.
+    Manages and creates Feed instances.
     The path can be specified in the constructor with path=&#34;path&#34;
     (TODO: test).
     &#34;&#34;&#34;
 
     def __init__(self, path: str = &#34;&#34;):
         self.path = path
-        self.log_dir = self.path + &#34;_logs&#34;
+        self.feed_dir = self.path + &#34;_logs&#34;
         self.blob_dir = self.path + &#34;_blobs&#34;
         self._check_dirs()
-        self.logs = self._get_logs()
+        self.feeds = self._get_feeds()
 
     def __len__(self):
-        return len(self.logs)
+        return len(self.feeds)
 
-    def __getitem__(self, i: int) -&gt; Log:
-        return self.logs[i]
+    def __getitem__(self, i: int) -&gt; Feed:
+        return self.feeds[i]
 
     def _check_dirs(self):
         &#34;&#34;&#34;
         Checks whether the _log and _blob firectories already exist.
         If not, new directories are created.
         &#34;&#34;&#34;
-        if not is_file(self.log_dir):
-            os.mkdir(self.log_dir)
+        if not is_file(self.feed_dir):
+            os.mkdir(self.feed_dir)
         if not is_file(self.blob_dir):
             os.mkdir(self.blob_dir)
 
-    def _get_logs(self) -&gt; [Log]:
+    def _get_feeds(self) -&gt; [Feed]:
         &#34;&#34;&#34;
-        Reads all .log files in the self.log_dir directory.
-        Returns a list of all Log instances.
+        Reads all .log files in the self.feed_dir directory.
+        Returns a list of all Feed instances.
         &#34;&#34;&#34;
-        logs = []
-        files = os.listdir(self.log_dir)
+        feeds = []
+        files = os.listdir(self.feed_dir)
         for f in files:
             if f.endswith(&#34;.log&#34;):
-                logs.append(Log(self.log_dir + &#34;/&#34; + f))
+                feeds.append(Feed(self.feed_dir + &#34;/&#34; + f))
 
-        return logs
+        return feeds
 
-    def get_log(self, fid: bytes) -&gt; Log:
+    def get_feed(self, fid: bytes) -&gt; Feed:
         &#34;&#34;&#34;
-        Searches for a specific Log in self.logs.
+        Searches for a specific Feed in self.feeds.
         The feed ID can be handed in as bytes, a hex string
         or a file name.
-        Retruns &#39;None&#39; if the log cannot be found.
+        Retruns &#39;None&#39; if the feed cannot be found.
         &#34;&#34;&#34;
         # transform to bytes
         if type(fid) is str:
@@ -298,25 +298,25 @@ The path can be specified in the constructor with path="path"
             fid = from_hex(fid)
 
         # search
-        for log in self.logs:
-            if log.fid == fid:
-                return log
+        for feed in self.feeds:
+            if feed.fid == fid:
+                return feed
 
         return None
 
-    def create_new_log(self,
-                       fid: bytes = None,
-                       trusted_seq: int = 0,
-                       trusted_mid: bytes = None,
-                       parent_seq: int = 0,
-                       parent_fid: bytes = bytes(32)) -&gt; Log:
+    def create_new_feed(self,
+                        fid: bytes = None,
+                        trusted_seq: int = 0,
+                        trusted_mid: bytes = None,
+                        parent_seq: int = 0,
+                        parent_fid: bytes = bytes(32)) -&gt; Feed:
         &#34;&#34;&#34;
-        Creates a new Log instance and adds it to self.logs.
+        Creates a new Feed instance and adds it to self.feeds.
         The feed ID, trusted sequence number, trusted message ID,
         parent feed ID and parent sequence number can be explicitly
         specified.
         If no feed ID is specified, a random one is generated.
-        Returns the newly created Log instance.
+        Returns the newly created Feed instance.
         &#34;&#34;&#34;
         if fid is None:
             fid = os.urandom(32)
@@ -334,7 +334,7 @@ The path can be specified in the constructor with path="path"
         assert len(parent_fid) == 32, &#34;parent_fid must be 32b&#34;
 
         # create log file
-        file_name = self.log_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
+        file_name = self.feed_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
         if os.path.isfile(file_name):
             return None
 
@@ -348,22 +348,22 @@ The path can be specified in the constructor with path="path"
         with open(file_name, &#34;wb&#34;) as f:
             f.write(header)
 
-        log = Log(file_name)
-        self.logs.append(log)
-        return log
+        feed = Feed(file_name)
+        self.feeds.append(feed)
+        return feed
 
-    def create_child_log(self, parent_fid: bytes,
-                         child_fid: bytes = None) -&gt; Log:
+    def create_child_feed(self, parent_fid: bytes,
+                          child_fid: bytes = None) -&gt; Feed:
         &#34;&#34;&#34;
-        Creates and returns a new child Log instance for the given parent.
-        The parent can be passed either as a Log instance, feed ID bytes,
+        Creates and returns a new child Feed instance for the given parent.
+        The parent can be passed either as a Feed instance, feed ID bytes,
         feed ID hex string or file name.
         The child feed ID can be explicitly definied.
         &#34;&#34;&#34;
-        if type(parent_fid) is Log:
+        if type(parent_fid) is Feed:
             parent = parent_fid
         else:
-            parent = self.get_log(parent_fid)
+            parent = self.get_feed(parent_fid)
 
         if parent is None:
             return None
@@ -377,78 +377,78 @@ The path can be specified in the constructor with path="path"
                                        parent.front_mid, child_fid)
         parent.append_pkt(parent_pkt)
 
-        # create child log
+        # create child feed
         child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
-        child_log = self.create_new_log(child_fid,
-                                        parent_fid=parent.fid,
-                                        parent_seq=parent.front_seq)
+        child_feed = self.create_new_feed(child_fid,
+                                          parent_fid=parent.fid,
+                                          parent_seq=parent.front_seq)
 
-        child_pkt = create_child_pkt(child_log.fid, child_payload)
-        child_log.append_pkt(child_pkt)
-        return child_log
+        child_pkt = create_child_pkt(child_feed.fid, child_payload)
+        child_feed.append_pkt(child_pkt)
+        return child_feed
 
-    def create_contn_log(self, end_fid: bytes,
-                         contn_fid: bytes = None) -&gt; Log:
+    def create_contn_feed(self, end_fid: bytes,
+                          contn_fid: bytes = None) -&gt; Feed:
         &#34;&#34;&#34;
-        Ends the given log and returns a new continuation Log instance.
-        The ending log can be passed either as a Log instance, feed ID bytes,
+        Ends the given feed and returns a new continuation Feed instance.
+        The ending feed can be passed either as a Feed instance, feed ID bytes,
         feed ID hex string or file name.
         The continuation feed ID can be explicitly defined.
         &#34;&#34;&#34;
-        if type(end_fid) is Log:
-            ending_log = end_fid
+        if type(end_fid) is Feed:
+            ending_feed = end_fid
         else:
-            ending_log = self.get_log(end_fid)
+            ending_feed = self.get_feed(end_fid)
 
-        if ending_log is None:
+        if ending_feed is None:
             return None
 
         if contn_fid is None:
             contn_fid = os.urandom(32)
 
-        end_seq = (ending_log.front_seq + 1).to_bytes(4, &#34;big&#34;)
-        end_pkt = create_end_pkt(ending_log.fid, end_seq,
-                                 ending_log.front_mid, contn_fid)
+        end_seq = (ending_feed.front_seq + 1).to_bytes(4, &#34;big&#34;)
+        end_pkt = create_end_pkt(ending_feed.fid, end_seq,
+                                 ending_feed.front_mid, contn_fid)
 
-        ending_log.append_pkt(end_pkt)
-        # create continuing log
+        ending_feed.append_pkt(end_pkt)
+        # create continuing feed
         contn_payload = end_pkt.fid + end_pkt.seq
         contn_payload += end_pkt.wire[-12:]
-        contn_log = self.create_new_log(contn_fid,
-                                        parent_fid=ending_log.fid,
-                                        parent_seq=ending_log.front_seq)
+        contn_feed = self.create_new_feed(contn_fid,
+                                          parent_fid=ending_feed.fid,
+                                          parent_seq=ending_feed.front_seq)
 
-        contn_pkt = create_contn_pkt(contn_log.fid, contn_payload)
-        contn_log.append(contn_pkt)
-        return contn_log</code></pre>
+        contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload)
+        contn_feed.append_pkt(contn_pkt)
+        return contn_feed</code></pre>
 </details>
 <h3>Methods</h3>
 <dl>
-<dt id="log_manager.LogManager.create_child_log"><code class="name flex">
-<span>def <span class="ident">create_child_log</span></span>(<span>self, parent_fid: bytes, child_fid: bytes = None) ‑> log.Log</span>
+<dt id="feed_manager.FeedManager.create_child_feed"><code class="name flex">
+<span>def <span class="ident">create_child_feed</span></span>(<span>self, parent_fid: bytes, child_fid: bytes = None) ‑> feed.Feed</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Creates and returns a new child Log instance for the given parent.
-The parent can be passed either as a Log instance, feed ID bytes,
+<div class="desc"><p>Creates and returns a new child Feed instance for the given parent.
+The parent can be passed either as a Feed instance, feed ID bytes,
 feed ID hex string or file name.
 The child feed ID can be explicitly definied.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_child_log(self, parent_fid: bytes,
-                     child_fid: bytes = None) -&gt; Log:
+<pre><code class="python">def create_child_feed(self, parent_fid: bytes,
+                      child_fid: bytes = None) -&gt; Feed:
     &#34;&#34;&#34;
-    Creates and returns a new child Log instance for the given parent.
-    The parent can be passed either as a Log instance, feed ID bytes,
+    Creates and returns a new child Feed instance for the given parent.
+    The parent can be passed either as a Feed instance, feed ID bytes,
     feed ID hex string or file name.
     The child feed ID can be explicitly definied.
     &#34;&#34;&#34;
-    if type(parent_fid) is Log:
+    if type(parent_fid) is Feed:
         parent = parent_fid
     else:
-        parent = self.get_log(parent_fid)
+        parent = self.get_feed(parent_fid)
 
     if parent is None:
         return None
@@ -462,93 +462,93 @@ The child feed ID can be explicitly definied.</p></div>
                                    parent.front_mid, child_fid)
     parent.append_pkt(parent_pkt)
 
-    # create child log
+    # create child feed
     child_payload = parent_pkt.fid + parent_pkt.seq
     child_payload += parent_pkt.wire[-12:]
-    child_log = self.create_new_log(child_fid,
-                                    parent_fid=parent.fid,
-                                    parent_seq=parent.front_seq)
+    child_feed = self.create_new_feed(child_fid,
+                                      parent_fid=parent.fid,
+                                      parent_seq=parent.front_seq)
 
-    child_pkt = create_child_pkt(child_log.fid, child_payload)
-    child_log.append_pkt(child_pkt)
-    return child_log</code></pre>
+    child_pkt = create_child_pkt(child_feed.fid, child_payload)
+    child_feed.append_pkt(child_pkt)
+    return child_feed</code></pre>
 </details>
 </dd>
-<dt id="log_manager.LogManager.create_contn_log"><code class="name flex">
-<span>def <span class="ident">create_contn_log</span></span>(<span>self, end_fid: bytes, contn_fid: bytes = None) ‑> log.Log</span>
+<dt id="feed_manager.FeedManager.create_contn_feed"><code class="name flex">
+<span>def <span class="ident">create_contn_feed</span></span>(<span>self, end_fid: bytes, contn_fid: bytes = None) ‑> feed.Feed</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Ends the given log and returns a new continuation Log instance.
-The ending log can be passed either as a Log instance, feed ID bytes,
+<div class="desc"><p>Ends the given feed and returns a new continuation Feed instance.
+The ending feed can be passed either as a Feed instance, feed ID bytes,
 feed ID hex string or file name.
 The continuation feed ID can be explicitly defined.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_contn_log(self, end_fid: bytes,
-                     contn_fid: bytes = None) -&gt; Log:
+<pre><code class="python">def create_contn_feed(self, end_fid: bytes,
+                      contn_fid: bytes = None) -&gt; Feed:
     &#34;&#34;&#34;
-    Ends the given log and returns a new continuation Log instance.
-    The ending log can be passed either as a Log instance, feed ID bytes,
+    Ends the given feed and returns a new continuation Feed instance.
+    The ending feed can be passed either as a Feed instance, feed ID bytes,
     feed ID hex string or file name.
     The continuation feed ID can be explicitly defined.
     &#34;&#34;&#34;
-    if type(end_fid) is Log:
-        ending_log = end_fid
+    if type(end_fid) is Feed:
+        ending_feed = end_fid
     else:
-        ending_log = self.get_log(end_fid)
+        ending_feed = self.get_feed(end_fid)
 
-    if ending_log is None:
+    if ending_feed is None:
         return None
 
     if contn_fid is None:
         contn_fid = os.urandom(32)
 
-    end_seq = (ending_log.front_seq + 1).to_bytes(4, &#34;big&#34;)
-    end_pkt = create_end_pkt(ending_log.fid, end_seq,
-                             ending_log.front_mid, contn_fid)
+    end_seq = (ending_feed.front_seq + 1).to_bytes(4, &#34;big&#34;)
+    end_pkt = create_end_pkt(ending_feed.fid, end_seq,
+                             ending_feed.front_mid, contn_fid)
 
-    ending_log.append_pkt(end_pkt)
-    # create continuing log
+    ending_feed.append_pkt(end_pkt)
+    # create continuing feed
     contn_payload = end_pkt.fid + end_pkt.seq
     contn_payload += end_pkt.wire[-12:]
-    contn_log = self.create_new_log(contn_fid,
-                                    parent_fid=ending_log.fid,
-                                    parent_seq=ending_log.front_seq)
+    contn_feed = self.create_new_feed(contn_fid,
+                                      parent_fid=ending_feed.fid,
+                                      parent_seq=ending_feed.front_seq)
 
-    contn_pkt = create_contn_pkt(contn_log.fid, contn_payload)
-    contn_log.append(contn_pkt)
-    return contn_log</code></pre>
+    contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload)
+    contn_feed.append_pkt(contn_pkt)
+    return contn_feed</code></pre>
 </details>
 </dd>
-<dt id="log_manager.LogManager.create_new_log"><code class="name flex">
-<span>def <span class="ident">create_new_log</span></span>(<span>self, fid: bytes = None, trusted_seq: int = 0, trusted_mid: bytes = None, parent_seq: int = 0, parent_fid: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') ‑> log.Log</span>
+<dt id="feed_manager.FeedManager.create_new_feed"><code class="name flex">
+<span>def <span class="ident">create_new_feed</span></span>(<span>self, fid: bytes = None, trusted_seq: int = 0, trusted_mid: bytes = None, parent_seq: int = 0, parent_fid: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') ‑> feed.Feed</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Creates a new Log instance and adds it to self.logs.
+<div class="desc"><p>Creates a new Feed instance and adds it to self.feeds.
 The feed ID, trusted sequence number, trusted message ID,
 parent feed ID and parent sequence number can be explicitly
 specified.
 If no feed ID is specified, a random one is generated.
-Returns the newly created Log instance.</p></div>
+Returns the newly created Feed instance.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_new_log(self,
-                   fid: bytes = None,
-                   trusted_seq: int = 0,
-                   trusted_mid: bytes = None,
-                   parent_seq: int = 0,
-                   parent_fid: bytes = bytes(32)) -&gt; Log:
+<pre><code class="python">def create_new_feed(self,
+                    fid: bytes = None,
+                    trusted_seq: int = 0,
+                    trusted_mid: bytes = None,
+                    parent_seq: int = 0,
+                    parent_fid: bytes = bytes(32)) -&gt; Feed:
     &#34;&#34;&#34;
-    Creates a new Log instance and adds it to self.logs.
+    Creates a new Feed instance and adds it to self.feeds.
     The feed ID, trusted sequence number, trusted message ID,
     parent feed ID and parent sequence number can be explicitly
     specified.
     If no feed ID is specified, a random one is generated.
-    Returns the newly created Log instance.
+    Returns the newly created Feed instance.
     &#34;&#34;&#34;
     if fid is None:
         fid = os.urandom(32)
@@ -566,7 +566,7 @@ Returns the newly created Log instance.</p></div>
     assert len(parent_fid) == 32, &#34;parent_fid must be 32b&#34;
 
     # create log file
-    file_name = self.log_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
+    file_name = self.feed_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
     if os.path.isfile(file_name):
         return None
 
@@ -580,29 +580,29 @@ Returns the newly created Log instance.</p></div>
     with open(file_name, &#34;wb&#34;) as f:
         f.write(header)
 
-    log = Log(file_name)
-    self.logs.append(log)
-    return log</code></pre>
+    feed = Feed(file_name)
+    self.feeds.append(feed)
+    return feed</code></pre>
 </details>
 </dd>
-<dt id="log_manager.LogManager.get_log"><code class="name flex">
-<span>def <span class="ident">get_log</span></span>(<span>self, fid: bytes) ‑> log.Log</span>
+<dt id="feed_manager.FeedManager.get_feed"><code class="name flex">
+<span>def <span class="ident">get_feed</span></span>(<span>self, fid: bytes) ‑> feed.Feed</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Searches for a specific Log in self.logs.
+<div class="desc"><p>Searches for a specific Feed in self.feeds.
 The feed ID can be handed in as bytes, a hex string
 or a file name.
-Retruns 'None' if the log cannot be found.</p></div>
+Retruns 'None' if the feed cannot be found.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_log(self, fid: bytes) -&gt; Log:
+<pre><code class="python">def get_feed(self, fid: bytes) -&gt; Feed:
     &#34;&#34;&#34;
-    Searches for a specific Log in self.logs.
+    Searches for a specific Feed in self.feeds.
     The feed ID can be handed in as bytes, a hex string
     or a file name.
-    Retruns &#39;None&#39; if the log cannot be found.
+    Retruns &#39;None&#39; if the feed cannot be found.
     &#34;&#34;&#34;
     # transform to bytes
     if type(fid) is str:
@@ -611,9 +611,9 @@ Retruns 'None' if the log cannot be found.</p></div>
         fid = from_hex(fid)
 
     # search
-    for log in self.logs:
-        if log.fid == fid:
-            return log
+    for feed in self.feeds:
+        if feed.fid == fid:
+            return feed
 
     return None</code></pre>
 </details>
@@ -632,12 +632,12 @@ Retruns 'None' if the log cannot be found.</p></div>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
-<h4><code><a title="log_manager.LogManager" href="#log_manager.LogManager">LogManager</a></code></h4>
+<h4><code><a title="feed_manager.FeedManager" href="#feed_manager.FeedManager">FeedManager</a></code></h4>
 <ul class="">
-<li><code><a title="log_manager.LogManager.create_child_log" href="#log_manager.LogManager.create_child_log">create_child_log</a></code></li>
-<li><code><a title="log_manager.LogManager.create_contn_log" href="#log_manager.LogManager.create_contn_log">create_contn_log</a></code></li>
-<li><code><a title="log_manager.LogManager.create_new_log" href="#log_manager.LogManager.create_new_log">create_new_log</a></code></li>
-<li><code><a title="log_manager.LogManager.get_log" href="#log_manager.LogManager.get_log">get_log</a></code></li>
+<li><code><a title="feed_manager.FeedManager.create_child_feed" href="#feed_manager.FeedManager.create_child_feed">create_child_feed</a></code></li>
+<li><code><a title="feed_manager.FeedManager.create_contn_feed" href="#feed_manager.FeedManager.create_contn_feed">create_contn_feed</a></code></li>
+<li><code><a title="feed_manager.FeedManager.create_new_feed" href="#feed_manager.FeedManager.create_new_feed">create_new_feed</a></code></li>
+<li><code><a title="feed_manager.FeedManager.get_feed" href="#feed_manager.FeedManager.get_feed">get_feed</a></code></li>
 </ul>
 </li>
 </ul>

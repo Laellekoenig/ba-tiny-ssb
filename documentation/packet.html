@@ -88,7 +88,7 @@ class Packet:
             payload += bytes(missing)
         assert len(payload) == 48, &#34;payload must be 48B&#34;
 
-        self.log_entry_name = self.prefix + fid + seq + prev_mid
+        self.block_name = self.prefix + fid + seq + prev_mid
         self.fid = fid
         self.seq = seq
         self.prev_mid = prev_mid
@@ -115,7 +115,7 @@ class Packet:
         Calculates the demultiplexing field of the packet.
         &#34;&#34;&#34;
         hash_algo = self.hash_algo()
-        hash_algo.update(self.log_entry_name)
+        hash_algo.update(self.block_name)
         return hash_algo.digest()[:7]
 
     def next_dmx(self) -&gt; bytes:
@@ -127,9 +127,9 @@ class Packet:
 
     def _expand(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Computes the 128B expanded log entry containing &#39;virtual&#39; information.
+        Computes the 128B expanded block containing &#39;virtual&#39; information.
         &#34;&#34;&#34;
-        return self.log_entry_name + self.dmx + self.pkt_type + self.payload
+        return self.block_name + self.dmx + self.pkt_type + self.payload
 
     def _calc_signature(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -141,8 +141,8 @@ class Packet:
 
     def _get_full(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Computes the full 184B log entry.
-        Consists of the expanded log entry and
+        Computes the full 184B block.
+        Consists of the expanded block and
         the signature of the packet.
         &#34;&#34;&#34;
         return self._expand() + self._calc_signature()
@@ -193,7 +193,7 @@ def create_genesis_pkt(fid: bytes, payload: bytes) -&gt; Packet:
     Creates and returns a &#39;self-signed&#39; Packet instance
     with sequence number of 1.
     Also contains a payload of max 48B.
-    Used when creating new logs.
+    Used when creating new feeds.
     &#34;&#34;&#34;
     seq = (1).to_bytes(4, &#34;big&#34;)  # seq numbers start at 1
     prev_mid = fid[:20]  # tiny ssb convention
@@ -204,7 +204,7 @@ def create_parent_pkt(fid: bytes, seq: bytes,
                       prev_mid: bytes, child_fid: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns a packet instance of type &#39;mkchild&#39;.
-    Is used in parent log, to refer to child logs.
+    Is used in parent feed, to refer to child feed.
     No payload can be attached to this packet,
     as it contains information about the child feed.
     &#34;&#34;&#34;
@@ -308,9 +308,9 @@ def dmx(name: bytes) -&gt; bytes:
     &#34;&#34;&#34;
     Calculates and returns the dmx value for the given name.
     &#34;&#34;&#34;
-    log_entry_name = Packet.prefix + name
+    block_name = Packet.prefix + name
     hash_algo = Packet.hash_algo()
-    hash_algo.update(log_entry_name)
+    hash_algo.update(block_name)
     return hash_algo.digest()[:7]</code></pre>
 </details>
 </section>
@@ -455,7 +455,7 @@ Has packet type 'contdas'.</p></div>
 <div class="desc"><p>Creates and returns a 'self-signed' Packet instance
 with sequence number of 1.
 Also contains a payload of max 48B.
-Used when creating new logs.</p></div>
+Used when creating new feeds.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -465,7 +465,7 @@ Used when creating new logs.</p></div>
     Creates and returns a &#39;self-signed&#39; Packet instance
     with sequence number of 1.
     Also contains a payload of max 48B.
-    Used when creating new logs.
+    Used when creating new feeds.
     &#34;&#34;&#34;
     seq = (1).to_bytes(4, &#34;big&#34;)  # seq numbers start at 1
     prev_mid = fid[:20]  # tiny ssb convention
@@ -477,7 +477,7 @@ Used when creating new logs.</p></div>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates and returns a packet instance of type 'mkchild'.
-Is used in parent log, to refer to child logs.
+Is used in parent feed, to refer to child feed.
 No payload can be attached to this packet,
 as it contains information about the child feed.</p></div>
 <details class="source">
@@ -488,7 +488,7 @@ as it contains information about the child feed.</p></div>
                       prev_mid: bytes, child_fid: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns a packet instance of type &#39;mkchild&#39;.
-    Is used in parent log, to refer to child logs.
+    Is used in parent feed, to refer to child feed.
     No payload can be attached to this packet,
     as it contains information about the child feed.
     &#34;&#34;&#34;
@@ -529,9 +529,9 @@ containing the given payload.</p></div>
     &#34;&#34;&#34;
     Calculates and returns the dmx value for the given name.
     &#34;&#34;&#34;
-    log_entry_name = Packet.prefix + name
+    block_name = Packet.prefix + name
     hash_algo = Packet.hash_algo()
-    hash_algo.update(log_entry_name)
+    hash_algo.update(block_name)
     return hash_algo.digest()[:7]</code></pre>
 </details>
 </dd>
@@ -643,7 +643,7 @@ The maximum payload size of a packet is 48B.</p></div>
             payload += bytes(missing)
         assert len(payload) == 48, &#34;payload must be 48B&#34;
 
-        self.log_entry_name = self.prefix + fid + seq + prev_mid
+        self.block_name = self.prefix + fid + seq + prev_mid
         self.fid = fid
         self.seq = seq
         self.prev_mid = prev_mid
@@ -670,7 +670,7 @@ The maximum payload size of a packet is 48B.</p></div>
         Calculates the demultiplexing field of the packet.
         &#34;&#34;&#34;
         hash_algo = self.hash_algo()
-        hash_algo.update(self.log_entry_name)
+        hash_algo.update(self.block_name)
         return hash_algo.digest()[:7]
 
     def next_dmx(self) -&gt; bytes:
@@ -682,9 +682,9 @@ The maximum payload size of a packet is 48B.</p></div>
 
     def _expand(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Computes the 128B expanded log entry containing &#39;virtual&#39; information.
+        Computes the 128B expanded block containing &#39;virtual&#39; information.
         &#34;&#34;&#34;
-        return self.log_entry_name + self.dmx + self.pkt_type + self.payload
+        return self.block_name + self.dmx + self.pkt_type + self.payload
 
     def _calc_signature(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -696,8 +696,8 @@ The maximum payload size of a packet is 48B.</p></div>
 
     def _get_full(self) -&gt; bytes:
         &#34;&#34;&#34;
-        Computes the full 184B log entry.
-        Consists of the expanded log entry and
+        Computes the full 184B block.
+        Consists of the expanded block and
         the signature of the packet.
         &#34;&#34;&#34;
         return self._expand() + self._calc_signature()
