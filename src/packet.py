@@ -274,3 +274,13 @@ def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
 
     chain.reverse()
     return (pkt, chain)
+
+
+def dmx(name: bytes) -> bytes:
+    """
+    Calculates and returns the dmx value for the given name.
+    """
+    log_entry_name = Packet.prefix + name
+    hash_algo = Packet.hash_algo()
+    hash_algo.update(log_entry_name)
+    return hash_algo.digest()[:7]

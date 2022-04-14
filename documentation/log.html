@@ -112,13 +112,13 @@ class Log:
         Does not return full blobs.
         &#34;&#34;&#34;
         if i &lt; 0:
-            seq = self.front_seq + i + 1  # access last pkt through -1 etc.
-        if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
+            i = self.front_seq + i + 1  # access last pkt through -1 etc.
+        if i &gt; self.front_seq or i &lt;= self.anchor_seq:
             raise IndexError
 
-        relative_seq = seq - self.anchor_seq
+        relative_i = i - self.anchor_seq
 
-        self.file.seek(128 * relative_seq)
+        self.file.seek(128 * relative_i)
         raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
         return raw_pkt[8:56]
 
@@ -228,7 +228,7 @@ class Log:
         if pkt is None:
             return False
 
-        self._append(pkt)
+        self.append_pkt(pkt)
         return self._write_blob(blobs)
 
     def _write_blob(self, blobs: [Blob]) -&gt; bool:
@@ -369,7 +369,14 @@ class Log:
         if first_pkt.pkt_type != PacketType.iscontn:
             return None
 
-        return first_pkt.payload[:32]</code></pre>
+        return first_pkt.payload[:32]
+
+    def get_front(self) -&gt; (int, bytes):
+        &#34;&#34;&#34;
+        Returns this log&#39;s front sequence number and front message ID
+        in a tuple.
+        &#34;&#34;&#34;
+        return (self.front_seq, self.front_mid)</code></pre>
 </details>
 </section>
 <section>
@@ -467,13 +474,13 @@ Used to get/appennd data from/to logs.</p></div>
         Does not return full blobs.
         &#34;&#34;&#34;
         if i &lt; 0:
-            seq = self.front_seq + i + 1  # access last pkt through -1 etc.
-        if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
+            i = self.front_seq + i + 1  # access last pkt through -1 etc.
+        if i &gt; self.front_seq or i &lt;= self.anchor_seq:
             raise IndexError
 
-        relative_seq = seq - self.anchor_seq
+        relative_i = i - self.anchor_seq
 
-        self.file.seek(128 * relative_seq)
+        self.file.seek(128 * relative_i)
         raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
         return raw_pkt[8:56]
 
@@ -583,7 +590,7 @@ Used to get/appennd data from/to logs.</p></div>
         if pkt is None:
             return False
 
-        self._append(pkt)
+        self.append_pkt(pkt)
         return self._write_blob(blobs)
 
     def _write_blob(self, blobs: [Blob]) -&gt; bool:
@@ -724,7 +731,14 @@ Used to get/appennd data from/to logs.</p></div>
         if first_pkt.pkt_type != PacketType.iscontn:
             return None
 
-        return first_pkt.payload[:32]</code></pre>
+        return first_pkt.payload[:32]
+
+    def get_front(self) -&gt; (int, bytes):
+        &#34;&#34;&#34;
+        Returns this log&#39;s front sequence number and front message ID
+        in a tuple.
+        &#34;&#34;&#34;
+        return (self.front_seq, self.front_mid)</code></pre>
 </details>
 <h3>Methods</h3>
 <dl>
@@ -752,7 +766,7 @@ refering to the blob files (in _blob directory).</p></div>
     if pkt is None:
         return False
 
-    self._append(pkt)
+    self.append_pkt(pkt)
     return self._write_blob(blobs)</code></pre>
 </details>
 </dd>
@@ -927,13 +941,13 @@ Does not return full blobs.</p></div>
     Does not return full blobs.
     &#34;&#34;&#34;
     if i &lt; 0:
-        seq = self.front_seq + i + 1  # access last pkt through -1 etc.
-    if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
+        i = self.front_seq + i + 1  # access last pkt through -1 etc.
+    if i &gt; self.front_seq or i &lt;= self.anchor_seq:
         raise IndexError
 
-    relative_seq = seq - self.anchor_seq
+    relative_i = i - self.anchor_seq
 
-    self.file.seek(128 * relative_seq)
+    self.file.seek(128 * relative_i)
     raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
     return raw_pkt[8:56]</code></pre>
 </details>
@@ -982,6 +996,24 @@ If this feed has not ended, 'None' is returned.</p></div>
         return None
 
     return last_pkt.payload[:32]</code></pre>
+</details>
+</dd>
+<dt id="log.Log.get_front"><code class="name flex">
+<span>def <span class="ident">get_front</span></span>(<span>self) ‑> (<class 'int'>, <class 'bytes'>)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Returns this log's front sequence number and front message ID
+in a tuple.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_front(self) -&gt; (int, bytes):
+    &#34;&#34;&#34;
+    Returns this log&#39;s front sequence number and front message ID
+    in a tuple.
+    &#34;&#34;&#34;
+    return (self.front_seq, self.front_mid)</code></pre>
 </details>
 </dd>
 <dt id="log.Log.get_parent"><code class="name flex">
@@ -1077,6 +1109,7 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
 <li><code><a title="log.Log.get_bytes_quick" href="#log.Log.get_bytes_quick">get_bytes_quick</a></code></li>
 <li><code><a title="log.Log.get_children" href="#log.Log.get_children">get_children</a></code></li>
 <li><code><a title="log.Log.get_contn" href="#log.Log.get_contn">get_contn</a></code></li>
+<li><code><a title="log.Log.get_front" href="#log.Log.get_front">get_front</a></code></li>
 <li><code><a title="log.Log.get_parent" href="#log.Log.get_parent">get_parent</a></code></li>
 <li><code><a title="log.Log.get_prev" href="#log.Log.get_prev">get_prev</a></code></li>
 <li><code><a title="log.Log.has_ended" href="#log.Log.has_ended">has_ended</a></code></li>

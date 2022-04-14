@@ -301,7 +301,17 @@ def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
                  payload, pkt_type=PacketType.chain20)
 
     chain.reverse()
-    return (pkt, chain)</code></pre>
+    return (pkt, chain)
+
+
+def dmx(name: bytes) -&gt; bytes:
+    &#34;&#34;&#34;
+    Calculates and returns the dmx value for the given name.
+    &#34;&#34;&#34;
+    log_entry_name = Packet.prefix + name
+    hash_algo = Packet.hash_algo()
+    hash_algo.update(log_entry_name)
+    return hash_algo.digest()[:7]</code></pre>
 </details>
 </section>
 <section>
@@ -504,6 +514,25 @@ containing the given payload.</p></div>
     &#34;&#34;&#34;
     seq = int.from_bytes(prev.seq, &#34;big&#34;) + 1
     return Packet(prev.fid, (seq).to_bytes(4, &#34;big&#34;), prev.mid, payload)</code></pre>
+</details>
+</dd>
+<dt id="packet.dmx"><code class="name flex">
+<span>def <span class="ident">dmx</span></span>(<span>name: bytes) ‑> bytes</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Calculates and returns the dmx value for the given name.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def dmx(name: bytes) -&gt; bytes:
+    &#34;&#34;&#34;
+    Calculates and returns the dmx value for the given name.
+    &#34;&#34;&#34;
+    log_entry_name = Packet.prefix + name
+    hash_algo = Packet.hash_algo()
+    hash_algo.update(log_entry_name)
+    return hash_algo.digest()[:7]</code></pre>
 </details>
 </dd>
 <dt id="packet.pkt_from_bytes"><code class="name flex">
@@ -822,6 +851,7 @@ The first argument is the caller class instance.</p></div>
 <li><code><a title="packet.create_genesis_pkt" href="#packet.create_genesis_pkt">create_genesis_pkt</a></code></li>
 <li><code><a title="packet.create_parent_pkt" href="#packet.create_parent_pkt">create_parent_pkt</a></code></li>
 <li><code><a title="packet.create_succ" href="#packet.create_succ">create_succ</a></code></li>
+<li><code><a title="packet.dmx" href="#packet.dmx">dmx</a></code></li>
 <li><code><a title="packet.pkt_from_bytes" href="#packet.pkt_from_bytes">pkt_from_bytes</a></code></li>
 </ul>
 </li>

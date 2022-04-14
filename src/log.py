@@ -342,3 +342,10 @@ class Log:
             return None
 
         return first_pkt.payload[:32]
+
+    def get_front(self) -> (int, bytes):
+        """
+        Returns this log's front sequence number and front message ID
+        in a tuple.
+        """
+        return (self.front_seq, self.front_mid)
