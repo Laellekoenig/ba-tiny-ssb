@@ -1,5 +1,5 @@
 import hashlib
-from hmac import sign
+from crypto import Crypto
 from ssb_util import to_var_int
 
 
@@ -27,7 +27,7 @@ class Blob:
         self.payload = payload
         self.ptr = ptr
         self.wire = payload + ptr
-        self.signature = Packet.hash_algo(self.wire).digest()[:20]
+        self.signature = Packet.crypto.hash(self.wire)[:20]
 
 
 class Packet:
@@ -40,13 +40,16 @@ class Packet:
     """
 
     prefix = b"tiny-v01"  # len must be 8B
-    hash_algo = hashlib.sha256
-    sign_algo = sign
-    secret = b"bad secret"
+    secret = b"bad secret"  # default key
+    crypto = Crypto(secret)
 
     def __init__(self, fid: bytes, seq: bytes,
                  prev_mid: bytes, payload: bytes = bytes(48),
-                 pkt_type: int = PacketType.plain48):
+                 pkt_type: int = PacketType.plain48, key: bytes = None):
+
+        # update key if needed
+        if key is not None:
+            self.crypto.update_key(key)
 
         assert len(fid) == 32, "fid must be 32B"
         assert len(seq) == 4, "sequence number must be 4B"
@@ -86,16 +89,14 @@ class Packet:
         """
         Calculates the demultiplexing field of the packet.
         """
-        hash_algo = self.hash_algo()
-        hash_algo.update(self.block_name)
-        return hash_algo.digest()[:7]
+        return self.crypto.hash(self.block_name)[:7]
 
     def next_dmx(self) -> bytes:
         """
         Predicts the next packet's dmx value.
         """
         next = self.fid + (self.seq + 1).to_bytes(4, "big") + self.mid
-        return self.hash_algo(next).digest()[:20]
+        return self.crypto.hash(next)[:20]
 
     def _expand(self) -> bytes:
         """
@@ -109,7 +110,7 @@ class Packet:
         For now, sha256 HMAC using symmetric key is used.
         Can be swapped out through 'sign_algo' field.
         """
-        return self.sign_algo(self.secret, self._expand())
+        return self.crypto.sign(self._expand())
 
     def _get_full(self) -> bytes:
         """
@@ -124,9 +125,7 @@ class Packet:
         Computes the 20B message ID of the packet.
         This message ID is referenced in the next packet.
         """
-        hash_algo = self.hash_algo()
-        hash_algo.update(self._get_full())
-        return hash_algo.digest()[:20]
+        return self.crypto.hash(self._get_full())[:20]
 
     def _get_wire(self) -> bytes:
         """
@@ -281,6 +280,4 @@ def dmx(name: bytes) -> bytes:
     Calculates and returns the dmx value for the given name.
     """
     block_name = Packet.prefix + name
-    hash_algo = Packet.hash_algo()
-    hash_algo.update(block_name)
-    return hash_algo.digest()[:7]
+    return Packet.crypto.hash(block_name)[:7]

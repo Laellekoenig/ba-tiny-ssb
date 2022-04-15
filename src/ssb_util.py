@@ -17,7 +17,10 @@ def is_file(file_name: str) -> bool:
         dir_prefix = "/".join(split[:-1])
         file_name = split[-1]
 
-    return file_name in os.listdir(dir_prefix)
+    if dir_prefix is None:
+        return file_name in os.listdir()
+    else:
+        return file_name in os.listdir(dir_prefix)
 
 
 def to_hex(b: bytes) -> str:

@@ -17,9 +17,10 @@ class Feed:
 
     def __init__(self, file_name: str):
         self.file_name = file_name
-        self.file = open(file_name, "rb+")
+        f = open(self.file_name, "rb")
+        header = f.read(128)
+        f.close()
 
-        header = self.file.read(128)
         # reserved = header[:12]
         self.fid = header[12:44]
         self.parent_id = header[44:76]
@@ -32,9 +33,6 @@ class Feed:
 
     def __len__(self) -> int:
         return self.front_seq
-
-    def __del__(self):
-        self.file.close()
 
     def __getitem__(self, seq: int) -> Packet:
         """
@@ -49,9 +47,11 @@ class Feed:
             raise IndexError
 
         relative_seq = seq - self.anchor_seq
+        f = open(self.file_name, "rb")
+        f.seek(128 * relative_seq)
+        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
+        f.close()
 
-        self.file.seek(128 * relative_seq)
-        raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
         return pkt_from_bytes(self.fid, seq.to_bytes(4, "big"),
                               self._mids[relative_seq - 1], raw_pkt)
 
@@ -81,7 +81,7 @@ class Feed:
         Negative indices access the feed from behind.
         The packet is NOT validated before the payload is returned.
         This is quicker than get_bytes.
-        Does not return full blobs.
+        Also returns full blobs, without verifying.
         """
         if i < 0:
             i = self.front_seq + i + 1  # access last pkt through -1 etc.
@@ -89,10 +89,28 @@ class Feed:
             raise IndexError
 
         relative_i = i - self.anchor_seq
+        f = open(self.file_name, "rb")
+        f.seek(128 * relative_i)
+        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
+        f.close()
 
-        self.file.seek(128 * relative_i)
-        raw_pkt = self.file.read(128)[8:]  # cut off reserved 8B
-        return raw_pkt[8:56]
+        # dmx = raw_pkt[:7]
+        pkt_type = raw_pkt[7:8]
+        payload = raw_pkt[8:56]
+        if pkt_type != PacketType.chain20:
+            return payload
+
+        # blob chain
+        size, num_bytes = from_var_int(payload)
+        content = payload[num_bytes:-20]
+
+        ptr = payload[-20:]
+        while ptr != bytes(20):
+            blob = self._get_blob(ptr)
+            ptr = blob.ptr
+            content += blob.payload
+
+        return content[:size]
 
     def get_bytes(self, i: int) -> bytes:
         """
@@ -130,13 +148,15 @@ class Feed:
         """
         mids = [self.fid[:20]]
         # TODO: error when packet cannot be confirmed
+        f = open(self.file_name, "rb")
         for i in range(self.anchor_seq + 1, self.front_seq + 1):
-            self.file.seek(128 * (i - self.anchor_seq))
-            raw_pkt = self.file.read(128)[8:]
+            f.seek(128 * (i - self.anchor_seq))
+            raw_pkt = f.read(128)[8:]
             pkt = pkt_from_bytes(self.fid, i.to_bytes(4, "big"),
                                  mids[-1], raw_pkt)
             mids.append(pkt.mid)
 
+        f.close()
         return mids
 
     def _update_header(self) -> None:
@@ -144,12 +164,18 @@ class Feed:
         Updates the front sequence number and message ID in the .log file
         with the current values of the instance.
         """
-        updated_info = self.front_seq.to_bytes(4, "big") + self.front_mid
-        assert len(updated_info) == 24, "new front seq and mid must be 24B"
+        new_info = self.front_seq.to_bytes(4, "big") + self.front_mid
+        assert len(new_info) == 24, "new front seq and mid must be 24B"
         # go to beginning of file + 104B (where front seq and mid are)
-        self.file.seek(104)
-        self.file.write(updated_info)
-        self.file.flush()
+        # this is not ideal, since the whole file has to be copied to memory
+        # this is due to some weird behaviour of micropython
+        f = open(self.file_name, "rb+")
+        f.seek(0)
+        file_content = f.read()
+        updated_content = file_content[:104] + new_info + file_content[128:]
+        f.seek(0)
+        f.write(updated_content)
+        f.close()
 
     def append_pkt(self, pkt: Packet) -> bool:
         """
@@ -166,11 +192,15 @@ class Feed:
         # TODO: better error handeling
         if pkt is None:
             return False
+
         # go to end of buffer and write
-        assert len(bytes(8) + pkt.wire) == 128, "wire pkt must be 128B"
-        self.file.seek(0, 2)
-        self.file.write(bytes(8) + pkt.wire)  # pappend 8B reserved
-        self.file.flush()
+        payload = bytes(8) + pkt.wire
+        assert len(payload) == 128, "wire pkt must be 128B"
+
+        f = open(self.file_name, "rb+")
+        f.seek(0, 2)
+        f.write(payload)  # pappend 8B reserved
+        f.close()
 
         # update header info
         self.front_seq += 1
@@ -193,8 +223,7 @@ class Feed:
         if pkt is None:
             return False
 
-        self.append_pkt(pkt)
-        return True
+        return self.append_pkt(pkt)
 
     def append_blob(self, payload: bytes) -> bool:
         """
@@ -266,10 +295,9 @@ class Feed:
         If validation fails, 'None' is returned.
         """
         assert pkt.pkt_type == PacketType.chain20, "pkt type must be chain20"
-        size, num_bytes = from_var_int(pkt.payload)
-        ptr = pkt.payload[-20:]
 
         blobs = []
+        ptr = pkt.payload[-20:]
         while ptr != bytes(20):
             blob = self._get_blob(ptr)
             ptr = blob.ptr
@@ -298,6 +326,8 @@ class Feed:
         """
         Returns 'True' if the feed was ended by a 'contdas' packet.
         """
+        if len(self) < 1:
+            return False
         last_pkt = self[-1]
         return last_pkt.pkt_type == PacketType.contdas
 

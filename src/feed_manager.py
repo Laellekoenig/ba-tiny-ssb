@@ -72,7 +72,7 @@ class FeedManager:
 
         return None
 
-    def create_new_feed(self,
+    def create_feed(self,
                         fid: bytes = None,
                         trusted_seq: int = 0,
                         trusted_mid: bytes = None,
@@ -103,18 +103,19 @@ class FeedManager:
 
         # create log file
         file_name = self.feed_dir + "/" + to_hex(fid) + ".log"
-        if os.path.isfile(file_name):
+        if is_file(file_name):
             return None
 
         header = bytes(12) + fid + parent_fid + parent_seq
         header += trusted_seq + trusted_mid
         header += trusted_seq + fid[:20]  # self-signed
 
-        assert len(header) == 128, f"header must be 128b, was {len(header)}"
+        assert len(header) == 128, "header must be 128b"
 
         # create new log file
-        with open(file_name, "wb") as f:
-            f.write(header)
+        f = open(file_name, "wb")
+        f.write(header)
+        f.close()
 
         feed = Feed(file_name)
         self.feeds.append(feed)
@@ -148,7 +149,7 @@ class FeedManager:
         # create child feed
         child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
-        child_feed = self.create_new_feed(child_fid,
+        child_feed = self.create_feed(child_fid,
                                           parent_fid=parent.fid,
                                           parent_seq=parent.front_seq)
 
@@ -183,7 +184,7 @@ class FeedManager:
         # create continuing feed
         contn_payload = end_pkt.fid + end_pkt.seq
         contn_payload += end_pkt.wire[-12:]
-        contn_feed = self.create_new_feed(contn_fid,
+        contn_feed = self.create_feed(contn_fid,
                                           parent_fid=ending_feed.fid,
                                           parent_seq=ending_feed.front_seq)
 

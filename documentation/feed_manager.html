@@ -100,7 +100,7 @@ class FeedManager:
 
         return None
 
-    def create_new_feed(self,
+    def create_feed(self,
                         fid: bytes = None,
                         trusted_seq: int = 0,
                         trusted_mid: bytes = None,
@@ -131,18 +131,19 @@ class FeedManager:
 
         # create log file
         file_name = self.feed_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
-        if os.path.isfile(file_name):
+        if is_file(file_name):
             return None
 
         header = bytes(12) + fid + parent_fid + parent_seq
         header += trusted_seq + trusted_mid
         header += trusted_seq + fid[:20]  # self-signed
 
-        assert len(header) == 128, f&#34;header must be 128b, was {len(header)}&#34;
+        assert len(header) == 128, &#34;header must be 128b&#34;
 
         # create new log file
-        with open(file_name, &#34;wb&#34;) as f:
-            f.write(header)
+        f = open(file_name, &#34;wb&#34;)
+        f.write(header)
+        f.close()
 
         feed = Feed(file_name)
         self.feeds.append(feed)
@@ -176,7 +177,7 @@ class FeedManager:
         # create child feed
         child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
-        child_feed = self.create_new_feed(child_fid,
+        child_feed = self.create_feed(child_fid,
                                           parent_fid=parent.fid,
                                           parent_seq=parent.front_seq)
 
@@ -211,7 +212,7 @@ class FeedManager:
         # create continuing feed
         contn_payload = end_pkt.fid + end_pkt.seq
         contn_payload += end_pkt.wire[-12:]
-        contn_feed = self.create_new_feed(contn_fid,
+        contn_feed = self.create_feed(contn_fid,
                                           parent_fid=ending_feed.fid,
                                           parent_seq=ending_feed.front_seq)
 
@@ -304,7 +305,7 @@ The path can be specified in the constructor with path="path"
 
         return None
 
-    def create_new_feed(self,
+    def create_feed(self,
                         fid: bytes = None,
                         trusted_seq: int = 0,
                         trusted_mid: bytes = None,
@@ -335,18 +336,19 @@ The path can be specified in the constructor with path="path"
 
         # create log file
         file_name = self.feed_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
-        if os.path.isfile(file_name):
+        if is_file(file_name):
             return None
 
         header = bytes(12) + fid + parent_fid + parent_seq
         header += trusted_seq + trusted_mid
         header += trusted_seq + fid[:20]  # self-signed
 
-        assert len(header) == 128, f&#34;header must be 128b, was {len(header)}&#34;
+        assert len(header) == 128, &#34;header must be 128b&#34;
 
         # create new log file
-        with open(file_name, &#34;wb&#34;) as f:
-            f.write(header)
+        f = open(file_name, &#34;wb&#34;)
+        f.write(header)
+        f.close()
 
         feed = Feed(file_name)
         self.feeds.append(feed)
@@ -380,7 +382,7 @@ The path can be specified in the constructor with path="path"
         # create child feed
         child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
-        child_feed = self.create_new_feed(child_fid,
+        child_feed = self.create_feed(child_fid,
                                           parent_fid=parent.fid,
                                           parent_seq=parent.front_seq)
 
@@ -415,7 +417,7 @@ The path can be specified in the constructor with path="path"
         # create continuing feed
         contn_payload = end_pkt.fid + end_pkt.seq
         contn_payload += end_pkt.wire[-12:]
-        contn_feed = self.create_new_feed(contn_fid,
+        contn_feed = self.create_feed(contn_fid,
                                           parent_fid=ending_feed.fid,
                                           parent_seq=ending_feed.front_seq)
 
@@ -465,7 +467,7 @@ The child feed ID can be explicitly definied.</p></div>
     # create child feed
     child_payload = parent_pkt.fid + parent_pkt.seq
     child_payload += parent_pkt.wire[-12:]
-    child_feed = self.create_new_feed(child_fid,
+    child_feed = self.create_feed(child_fid,
                                       parent_fid=parent.fid,
                                       parent_seq=parent.front_seq)
 
@@ -513,7 +515,7 @@ The continuation feed ID can be explicitly defined.</p></div>
     # create continuing feed
     contn_payload = end_pkt.fid + end_pkt.seq
     contn_payload += end_pkt.wire[-12:]
-    contn_feed = self.create_new_feed(contn_fid,
+    contn_feed = self.create_feed(contn_fid,
                                       parent_fid=ending_feed.fid,
                                       parent_seq=ending_feed.front_seq)
 
@@ -522,8 +524,8 @@ The continuation feed ID can be explicitly defined.</p></div>
     return contn_feed</code></pre>
 </details>
 </dd>
-<dt id="feed_manager.FeedManager.create_new_feed"><code class="name flex">
-<span>def <span class="ident">create_new_feed</span></span>(<span>self, fid: bytes = None, trusted_seq: int = 0, trusted_mid: bytes = None, parent_seq: int = 0, parent_fid: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') ‑> feed.Feed</span>
+<dt id="feed_manager.FeedManager.create_feed"><code class="name flex">
+<span>def <span class="ident">create_feed</span></span>(<span>self, fid: bytes = None, trusted_seq: int = 0, trusted_mid: bytes = None, parent_seq: int = 0, parent_fid: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00') ‑> feed.Feed</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates a new Feed instance and adds it to self.feeds.
@@ -536,7 +538,7 @@ Returns the newly created Feed instance.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_new_feed(self,
+<pre><code class="python">def create_feed(self,
                     fid: bytes = None,
                     trusted_seq: int = 0,
                     trusted_mid: bytes = None,
@@ -567,18 +569,19 @@ Returns the newly created Feed instance.</p></div>
 
     # create log file
     file_name = self.feed_dir + &#34;/&#34; + to_hex(fid) + &#34;.log&#34;
-    if os.path.isfile(file_name):
+    if is_file(file_name):
         return None
 
     header = bytes(12) + fid + parent_fid + parent_seq
     header += trusted_seq + trusted_mid
     header += trusted_seq + fid[:20]  # self-signed
 
-    assert len(header) == 128, f&#34;header must be 128b, was {len(header)}&#34;
+    assert len(header) == 128, &#34;header must be 128b&#34;
 
     # create new log file
-    with open(file_name, &#34;wb&#34;) as f:
-        f.write(header)
+    f = open(file_name, &#34;wb&#34;)
+    f.write(header)
+    f.close()
 
     feed = Feed(file_name)
     self.feeds.append(feed)
@@ -636,7 +639,7 @@ Retruns 'None' if the feed cannot be found.</p></div>
 <ul class="">
 <li><code><a title="feed_manager.FeedManager.create_child_feed" href="#feed_manager.FeedManager.create_child_feed">create_child_feed</a></code></li>
 <li><code><a title="feed_manager.FeedManager.create_contn_feed" href="#feed_manager.FeedManager.create_contn_feed">create_contn_feed</a></code></li>
-<li><code><a title="feed_manager.FeedManager.create_new_feed" href="#feed_manager.FeedManager.create_new_feed">create_new_feed</a></code></li>
+<li><code><a title="feed_manager.FeedManager.create_feed" href="#feed_manager.FeedManager.create_feed">create_feed</a></code></li>
 <li><code><a title="feed_manager.FeedManager.get_feed" href="#feed_manager.FeedManager.get_feed">get_feed</a></code></li>
 </ul>
 </li>

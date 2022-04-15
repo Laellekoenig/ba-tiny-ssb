@@ -45,7 +45,10 @@ def is_file(file_name: str) -&gt; bool:
         dir_prefix = &#34;/&#34;.join(split[:-1])
         file_name = split[-1]
 
-    return file_name in os.listdir(dir_prefix)
+    if dir_prefix is None:
+        return file_name in os.listdir()
+    else:
+        return file_name in os.listdir(dir_prefix)
 
 
 def to_hex(b: bytes) -&gt; str:
@@ -174,7 +177,10 @@ Directory names may not end with '/'.</p></div>
         dir_prefix = &#34;/&#34;.join(split[:-1])
         file_name = split[-1]
 
-    return file_name in os.listdir(dir_prefix)</code></pre>
+    if dir_prefix is None:
+        return file_name in os.listdir()
+    else:
+        return file_name in os.listdir(dir_prefix)</code></pre>
 </details>
 </dd>
 <dt id="ssb_util.to_hex"><code class="name flex">

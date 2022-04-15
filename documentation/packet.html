@@ -27,7 +27,7 @@
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">import hashlib
-from hmac import sign
+from crypto import Crypto
 from ssb_util import to_var_int
 
 
@@ -55,7 +55,7 @@ class Blob:
         self.payload = payload
         self.ptr = ptr
         self.wire = payload + ptr
-        self.signature = Packet.hash_algo(self.wire).digest()[:20]
+        self.signature = Packet.crypto.hash(self.wire)[:20]
 
 
 class Packet:
@@ -68,13 +68,16 @@ class Packet:
     &#34;&#34;&#34;
 
     prefix = b&#34;tiny-v01&#34;  # len must be 8B
-    hash_algo = hashlib.sha256
-    sign_algo = sign
-    secret = b&#34;bad secret&#34;
+    secret = b&#34;bad secret&#34;  # default key
+    crypto = Crypto(secret)
 
     def __init__(self, fid: bytes, seq: bytes,
                  prev_mid: bytes, payload: bytes = bytes(48),
-                 pkt_type: int = PacketType.plain48):
+                 pkt_type: int = PacketType.plain48, key: bytes = None):
+
+        # update key if needed
+        if key is not None:
+            self.crypto.update_key(key)
 
         assert len(fid) == 32, &#34;fid must be 32B&#34;
         assert len(seq) == 4, &#34;sequence number must be 4B&#34;
@@ -114,16 +117,14 @@ class Packet:
         &#34;&#34;&#34;
         Calculates the demultiplexing field of the packet.
         &#34;&#34;&#34;
-        hash_algo = self.hash_algo()
-        hash_algo.update(self.block_name)
-        return hash_algo.digest()[:7]
+        return self.crypto.hash(self.block_name)[:7]
 
     def next_dmx(self) -&gt; bytes:
         &#34;&#34;&#34;
         Predicts the next packet&#39;s dmx value.
         &#34;&#34;&#34;
         next = self.fid + (self.seq + 1).to_bytes(4, &#34;big&#34;) + self.mid
-        return self.hash_algo(next).digest()[:20]
+        return self.crypto.hash(next)[:20]
 
     def _expand(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -137,7 +138,7 @@ class Packet:
         For now, sha256 HMAC using symmetric key is used.
         Can be swapped out through &#39;sign_algo&#39; field.
         &#34;&#34;&#34;
-        return self.sign_algo(self.secret, self._expand())
+        return self.crypto.sign(self._expand())
 
     def _get_full(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -152,9 +153,7 @@ class Packet:
         Computes the 20B message ID of the packet.
         This message ID is referenced in the next packet.
         &#34;&#34;&#34;
-        hash_algo = self.hash_algo()
-        hash_algo.update(self._get_full())
-        return hash_algo.digest()[:20]
+        return self.crypto.hash(self._get_full())[:20]
 
     def _get_wire(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -309,9 +308,7 @@ def dmx(name: bytes) -&gt; bytes:
     Calculates and returns the dmx value for the given name.
     &#34;&#34;&#34;
     block_name = Packet.prefix + name
-    hash_algo = Packet.hash_algo()
-    hash_algo.update(block_name)
-    return hash_algo.digest()[:7]</code></pre>
+    return Packet.crypto.hash(block_name)[:7]</code></pre>
 </details>
 </section>
 <section>
@@ -530,9 +527,7 @@ containing the given payload.</p></div>
     Calculates and returns the dmx value for the given name.
     &#34;&#34;&#34;
     block_name = Packet.prefix + name
-    hash_algo = Packet.hash_algo()
-    hash_algo.update(block_name)
-    return hash_algo.digest()[:7]</code></pre>
+    return Packet.crypto.hash(block_name)[:7]</code></pre>
 </details>
 </dd>
 <dt id="packet.pkt_from_bytes"><code class="name flex">
@@ -596,12 +591,12 @@ Not used for first blob entry (Packet).</p></div>
         self.payload = payload
         self.ptr = ptr
         self.wire = payload + ptr
-        self.signature = Packet.hash_algo(self.wire).digest()[:20]</code></pre>
+        self.signature = Packet.crypto.hash(self.wire)[:20]</code></pre>
 </details>
 </dd>
 <dt id="packet.Packet"><code class="flex name class">
 <span>class <span class="ident">Packet</span></span>
-<span>(</span><span>fid: bytes, seq: bytes, prev_mid: bytes, payload: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00', pkt_type: int = b'\x00')</span>
+<span>(</span><span>fid: bytes, seq: bytes, prev_mid: bytes, payload: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00', pkt_type: int = b'\x00', key: bytes = None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Contains all the information as defined in tiny-ssb protocol.
@@ -623,13 +618,16 @@ The maximum payload size of a packet is 48B.</p></div>
     &#34;&#34;&#34;
 
     prefix = b&#34;tiny-v01&#34;  # len must be 8B
-    hash_algo = hashlib.sha256
-    sign_algo = sign
-    secret = b&#34;bad secret&#34;
+    secret = b&#34;bad secret&#34;  # default key
+    crypto = Crypto(secret)
 
     def __init__(self, fid: bytes, seq: bytes,
                  prev_mid: bytes, payload: bytes = bytes(48),
-                 pkt_type: int = PacketType.plain48):
+                 pkt_type: int = PacketType.plain48, key: bytes = None):
+
+        # update key if needed
+        if key is not None:
+            self.crypto.update_key(key)
 
         assert len(fid) == 32, &#34;fid must be 32B&#34;
         assert len(seq) == 4, &#34;sequence number must be 4B&#34;
@@ -669,16 +667,14 @@ The maximum payload size of a packet is 48B.</p></div>
         &#34;&#34;&#34;
         Calculates the demultiplexing field of the packet.
         &#34;&#34;&#34;
-        hash_algo = self.hash_algo()
-        hash_algo.update(self.block_name)
-        return hash_algo.digest()[:7]
+        return self.crypto.hash(self.block_name)[:7]
 
     def next_dmx(self) -&gt; bytes:
         &#34;&#34;&#34;
         Predicts the next packet&#39;s dmx value.
         &#34;&#34;&#34;
         next = self.fid + (self.seq + 1).to_bytes(4, &#34;big&#34;) + self.mid
-        return self.hash_algo(next).digest()[:20]
+        return self.crypto.hash(next)[:20]
 
     def _expand(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -692,7 +688,7 @@ The maximum payload size of a packet is 48B.</p></div>
         For now, sha256 HMAC using symmetric key is used.
         Can be swapped out through &#39;sign_algo&#39; field.
         &#34;&#34;&#34;
-        return self.sign_algo(self.secret, self._expand())
+        return self.crypto.sign(self._expand())
 
     def _get_full(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -707,9 +703,7 @@ The maximum payload size of a packet is 48B.</p></div>
         Computes the 20B message ID of the packet.
         This message ID is referenced in the next packet.
         &#34;&#34;&#34;
-        hash_algo = self.hash_algo()
-        hash_algo.update(self._get_full())
-        return hash_algo.digest()[:20]
+        return self.crypto.hash(self._get_full())[:20]
 
     def _get_wire(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -721,6 +715,10 @@ The maximum payload size of a packet is 48B.</p></div>
 </details>
 <h3>Class variables</h3>
 <dl>
+<dt id="packet.Packet.crypto"><code class="name">var <span class="ident">crypto</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
 <dt id="packet.Packet.prefix"><code class="name">var <span class="ident">prefix</span></code></dt>
 <dd>
 <div class="desc"></div>
@@ -732,12 +730,6 @@ The maximum payload size of a packet is 48B.</p></div>
 </dl>
 <h3>Methods</h3>
 <dl>
-<dt id="packet.Packet.hash_algo"><code class="name flex">
-<span>def <span class="ident">hash_algo</span></span>(<span>string=b'', *, usedforsecurity=True)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Returns a sha256 hash object; optionally initialized with a string</p></div>
-</dd>
 <dt id="packet.Packet.next_dmx"><code class="name flex">
 <span>def <span class="ident">next_dmx</span></span>(<span>self) ‑> bytes</span>
 </code></dt>
@@ -752,32 +744,7 @@ The maximum payload size of a packet is 48B.</p></div>
     Predicts the next packet&#39;s dmx value.
     &#34;&#34;&#34;
     next = self.fid + (self.seq + 1).to_bytes(4, &#34;big&#34;) + self.mid
-    return self.hash_algo(next).digest()[:20]</code></pre>
-</details>
-</dd>
-<dt id="packet.Packet.sign_algo"><code class="name flex">
-<span>def <span class="ident">sign_algo</span></span>(<span>pkt_instance, key: bytes, payload: bytes) ‑> bytes</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Calculates the HMAC signature of the given bytes.
-Uses the given symmetric key.
-The signature is padded to 64B for tiny ssb compatibility.
-Must be called from within a class (e.g. Packet).
-The first argument is the caller class instance.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def sign(pkt_instance, key: bytes, payload: bytes) -&gt; bytes:
-    &#34;&#34;&#34;
-    Calculates the HMAC signature of the given bytes.
-    Uses the given symmetric key.
-    The signature is padded to 64B for tiny ssb compatibility.
-    Must be called from within a class (e.g. Packet).
-    The first argument is the caller class instance.
-    &#34;&#34;&#34;
-    hmac = HMAC(key)
-    return hmac.get_signature(payload) + bytes(32)</code></pre>
+    return self.crypto.hash(next)[:20]</code></pre>
 </details>
 </dd>
 </dl>
@@ -863,11 +830,10 @@ The first argument is the caller class instance.</p></div>
 <li>
 <h4><code><a title="packet.Packet" href="#packet.Packet">Packet</a></code></h4>
 <ul class="">
-<li><code><a title="packet.Packet.hash_algo" href="#packet.Packet.hash_algo">hash_algo</a></code></li>
+<li><code><a title="packet.Packet.crypto" href="#packet.Packet.crypto">crypto</a></code></li>
 <li><code><a title="packet.Packet.next_dmx" href="#packet.Packet.next_dmx">next_dmx</a></code></li>
 <li><code><a title="packet.Packet.prefix" href="#packet.Packet.prefix">prefix</a></code></li>
 <li><code><a title="packet.Packet.secret" href="#packet.Packet.secret">secret</a></code></li>
-<li><code><a title="packet.Packet.sign_algo" href="#packet.Packet.sign_algo">sign_algo</a></code></li>
 </ul>
 </li>
 <li>
