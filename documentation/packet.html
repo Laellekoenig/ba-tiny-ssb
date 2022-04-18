@@ -26,8 +26,10 @@
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">import hashlib
-from crypto import Crypto
+<pre><code class="python"># from crypto import Crypto
+import hashlib
+from crypto import sign_elliptic
+from crypto import verify_elliptic
 from ssb_util import to_var_int
 
 
@@ -47,7 +49,7 @@ class PacketType:
 
 class Blob:
     &#34;&#34;&#34;
-    Simple class for handeling blob information.
+    Simple class for handling blob information.
     Not used for first blob entry (Packet).
     &#34;&#34;&#34;
 
@@ -55,33 +57,30 @@ class Blob:
         self.payload = payload
         self.ptr = ptr
         self.wire = payload + ptr
-        self.signature = Packet.crypto.hash(self.wire)[:20]
+        self.signature = hashlib.sha256(self.wire).digest()[:20]
 
 
 class Packet:
     &#34;&#34;&#34;
     Contains all the information as defined in tiny-ssb protocol.
     Contains bytes payload and feed information.
-    The hashing and signing algorithms can be changed thorugh the
+    The hashing and signing algorithms can be changed through the
     &#39;hash_algo&#39; and &#39;sign_algo&#39; fields.
     The maximum payload size of a packet is 48B.
     &#34;&#34;&#34;
 
-    prefix = b&#34;tiny-v01&#34;  # len must be 8B
-    secret = b&#34;bad secret&#34;  # default key
-    crypto = Crypto(secret)
+    prefix = b&#34;tiny-v01&#34;  # length must be 8B
 
     def __init__(self, fid: bytes, seq: bytes,
                  prev_mid: bytes, payload: bytes = bytes(48),
-                 pkt_type: int = PacketType.plain48, key: bytes = None):
-
-        # update key if needed
-        if key is not None:
-            self.crypto.update_key(key)
+                 pkt_type: bytes = PacketType.plain48,
+                 skey: bytes = None):
 
         assert len(fid) == 32, &#34;fid must be 32B&#34;
         assert len(seq) == 4, &#34;sequence number must be 4B&#34;
         assert len(prev_mid) == 20, &#34;previous msg_id must be 20B&#34;
+        if skey is not None:
+            assert len(skey) == 32, &#34;signing key must be 32B&#34;
         # make sure that payload is 48 bytes, rejected if too long
         if payload is None:
             payload = bytes(48)
@@ -97,10 +96,16 @@ class Packet:
         self.prev_mid = prev_mid
         self.payload = payload
         self.pkt_type = pkt_type
+        self.skey = skey
         self.dmx = self._calc_dmx()
-        self.signature = self._calc_signature()
-        self.mid = self._calc_mid()
-        self.wire = self._get_wire()
+        if self.skey is None:
+            self.signature = None
+            self.mid = None
+            self.wire = None
+        else:
+            self.signature = self._calc_signature()
+            self.mid = self._calc_mid()
+            self.wire = self._get_wire()
 
     def __repr__(self):
         s = &#34;packet(\nfeed_id:{},\nseq:{},\n&#34;.format(self.fid,
@@ -117,14 +122,17 @@ class Packet:
         &#34;&#34;&#34;
         Calculates the demultiplexing field of the packet.
         &#34;&#34;&#34;
-        return self.crypto.hash(self.block_name)[:7]
+        return hashlib.sha256(self.block_name).digest()[:7]
 
     def next_dmx(self) -&gt; bytes:
         &#34;&#34;&#34;
         Predicts the next packet&#39;s dmx value.
         &#34;&#34;&#34;
-        next = self.fid + (self.seq + 1).to_bytes(4, &#34;big&#34;) + self.mid
-        return self.crypto.hash(next)[:20]
+        assert self.mid is not None, &#34;sign packet first&#34;
+
+        next_seq = int.from_bytes(self.seq, &#34;big&#34;) + 1
+        next = self.fid + next_seq.to_bytes(4, &#34;big&#34;) + self.mid
+        return hashlib.sha256(next).digest()[:20]
 
     def _expand(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -138,7 +146,8 @@ class Packet:
         For now, sha256 HMAC using symmetric key is used.
         Can be swapped out through &#39;sign_algo&#39; field.
         &#34;&#34;&#34;
-        return self.crypto.sign(self._expand())
+        assert self.skey is not None, &#34;key needed for signing&#34;
+        return sign_elliptic(self.skey, self._expand())
 
     def _get_full(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -146,6 +155,8 @@ class Packet:
         Consists of the expanded block and
         the signature of the packet.
         &#34;&#34;&#34;
+        if self.signature is not None:
+            return self._expand() + self.signature
         return self._expand() + self._calc_signature()
 
     def _calc_mid(self) -&gt; bytes:
@@ -153,7 +164,7 @@ class Packet:
         Computes the 20B message ID of the packet.
         This message ID is referenced in the next packet.
         &#34;&#34;&#34;
-        return self.crypto.hash(self._get_full())[:20]
+        return hashlib.sha256(self._get_full()).digest()[:20]
 
     def _get_wire(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -161,7 +172,17 @@ class Packet:
         The missing &#39;virtual&#39; information can be infereed by
         the recipient using prior packets.
         &#34;&#34;&#34;
+        assert self.signature is not None, &#34;sign packet first&#34;
         return self.dmx + self.pkt_type + self.payload + self.signature
+
+    def sign(self, skey: bytes = bytes(0)) -&gt; None:
+        &#34;&#34;&#34;Calculates the signature of the Packet and all the related fields
+        using the provided signing key&#34;&#34;&#34;
+        assert len(skey) == 32, &#34;skey must be 32B&#34;
+        self.skey = skey
+        self.signature = self._calc_signature()
+        self.mid = self._calc_mid()
+        self.wire = self._get_wire()
 
 
 def pkt_from_bytes(fid: bytes, seq: bytes,
@@ -173,6 +194,7 @@ def pkt_from_bytes(fid: bytes, seq: bytes,
     If the signatures do not match, &#39;None&#39; is returned.
     &#34;&#34;&#34;
     assert len(raw_pkt) == 120, &#34;raw packet length must be 120B&#34;
+    assert len(fid) == 32, &#34;feed id must be 32B&#34;
     # dmx = raw_pkt[:7]
     pkt_type = raw_pkt[7:8]
     payload = raw_pkt[8:56]
@@ -180,14 +202,20 @@ def pkt_from_bytes(fid: bytes, seq: bytes,
 
     pkt = Packet(fid, seq, prev_mid, payload, pkt_type=pkt_type)
 
-    # confirm packet
-    if signature != pkt.signature:
+    # use fid as verification key
+    if verify_elliptic(pkt._expand(), signature, fid):
+        pkt = Packet(fid, seq, prev_mid, payload, pkt_type=pkt_type)
+        # fill-in signature and calculate missing info
+        pkt.signature = signature
+        pkt.mid = pkt._calc_mid()
+        pkt.wire = raw_pkt
+        return pkt
+    else:
         print(&#34;packet not trusted&#34;)
         return None
-    return pkt
 
 
-def create_genesis_pkt(fid: bytes, payload: bytes) -&gt; Packet:
+def create_genesis_pkt(fid: bytes, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns a &#39;self-signed&#39; Packet instance
     with sequence number of 1.
@@ -196,11 +224,12 @@ def create_genesis_pkt(fid: bytes, payload: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     seq = (1).to_bytes(4, &#34;big&#34;)  # seq numbers start at 1
     prev_mid = fid[:20]  # tiny ssb convention
-    return Packet(fid, seq, prev_mid, payload)
+    return Packet(fid, seq, prev_mid, payload, skey=skey)
 
 
 def create_parent_pkt(fid: bytes, seq: bytes,
-                      prev_mid: bytes, child_fid: bytes) -&gt; Packet:
+                      prev_mid: bytes, child_fid: bytes,
+                      skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns a packet instance of type &#39;mkchild&#39;.
     Is used in parent feed, to refer to child feed.
@@ -209,10 +238,10 @@ def create_parent_pkt(fid: bytes, seq: bytes,
     &#34;&#34;&#34;
     # TODO: maybe add time stamp?
     return Packet(fid, seq, prev_mid,
-                  payload=child_fid, pkt_type=PacketType.mkchild)
+                  payload=child_fid, pkt_type=PacketType.mkchild, skey=skey)
 
 
-def create_child_pkt(fid: bytes, payload: bytes) -&gt; Packet:
+def create_child_pkt(fid: bytes, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the first packet of a new child feed.
     Starts with sequence number 1 and has
@@ -221,11 +250,12 @@ def create_child_pkt(fid: bytes, payload: bytes) -&gt; Packet:
     seq = (1).to_bytes(4, &#34;big&#34;)
     prev_mid = fid[:20]
     return Packet(fid, seq, prev_mid,
-                  payload, pkt_type=PacketType.ischild)
+                  payload, pkt_type=PacketType.ischild, skey=skey)
 
 
 def create_end_pkt(fid: bytes, seq: bytes,
-                   prev_mid: bytes, contn_fid: bytes) -&gt; Packet:
+                   prev_mid: bytes, contn_fid: bytes,
+                   skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the last packet of a feed.
     Contains information of the continuing feed.
@@ -233,10 +263,10 @@ def create_end_pkt(fid: bytes, seq: bytes,
     &#34;&#34;&#34;
     # TODO: maybe add time stamp?
     return Packet(fid, seq, prev_mid,
-                  payload=contn_fid, pkt_type=PacketType.contdas)
+                  payload=contn_fid, pkt_type=PacketType.contdas, skey=skey)
 
 
-def create_contn_pkt(fid: bytes, payload: bytes) -&gt; Packet:
+def create_contn_pkt(fid: bytes, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the first packet of a continuation feed.
     Starts at sequence number 1 and has packet type &#39;iscontn&#39;.
@@ -244,20 +274,22 @@ def create_contn_pkt(fid: bytes, payload: bytes) -&gt; Packet:
     seq = (1).to_bytes(4, &#34;big&#34;)
     prev_mid = fid[:20]
     return Packet(fid, seq, prev_mid,
-                  payload, pkt_type=PacketType.iscontn)
+                  payload, pkt_type=PacketType.iscontn, skey=skey)
 
 
-def create_succ(prev: Packet, payload: bytes) -&gt; Packet:
+def create_succ(prev: Packet, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the successor of the given packet,
     containing the given payload.
     &#34;&#34;&#34;
+    assert prev.mid is not None, &#34;previous packet must be signed&#34;
     seq = int.from_bytes(prev.seq, &#34;big&#34;) + 1
-    return Packet(prev.fid, (seq).to_bytes(4, &#34;big&#34;), prev.mid, payload)
+    return Packet(prev.fid, (seq).to_bytes(4, &#34;big&#34;),
+                  prev.mid, payload, skey=skey)
 
 
 def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
-                 content: bytes) -&gt; (Packet, [Blob]):
+                 content: bytes, skey: bytes) -&gt; tuple[Packet, list[Blob]]:
     &#34;&#34;&#34;
     Creates a blob chain, containing the given bytes (content).
     The blob is returned as a tuple, containing the header of the blob
@@ -297,7 +329,7 @@ def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
     payload = header + ptr
     assert len(payload) == 48, &#34;blob header must be 48B&#34;
     pkt = Packet(fid, seq, prev_mid,
-                 payload, pkt_type=PacketType.chain20)
+                 payload, pkt_type=PacketType.chain20, skey=skey)
 
     chain.reverse()
     return (pkt, chain)
@@ -308,7 +340,7 @@ def dmx(name: bytes) -&gt; bytes:
     Calculates and returns the dmx value for the given name.
     &#34;&#34;&#34;
     block_name = Packet.prefix + name
-    return Packet.crypto.hash(block_name)[:7]</code></pre>
+    return hashlib.sha256(block_name).digest()[:7]</code></pre>
 </details>
 </section>
 <section>
@@ -319,7 +351,7 @@ def dmx(name: bytes) -&gt; bytes:
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
 <dt id="packet.create_chain"><code class="name flex">
-<span>def <span class="ident">create_chain</span></span>(<span>fid: bytes, seq: bytes, prev_mid: bytes, content: bytes) ‑> (<class '<a title="packet.Packet" href="#packet.Packet">Packet</a>'>, [<class '<a title="packet.Blob" href="#packet.Blob">Blob</a>'>])</span>
+<span>def <span class="ident">create_chain</span></span>(<span>fid: bytes, seq: bytes, prev_mid: bytes, content: bytes, skey: bytes) ‑> tuple[<a title="packet.Packet" href="#packet.Packet">Packet</a>, list[<a title="packet.Blob" href="#packet.Blob">Blob</a>]]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates a blob chain, containing the given bytes (content).
@@ -332,7 +364,7 @@ The blob list is empty if the content fits into the blob header.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
-                 content: bytes) -&gt; (Packet, [Blob]):
+                 content: bytes, skey: bytes) -&gt; tuple[Packet, list[Blob]]:
     &#34;&#34;&#34;
     Creates a blob chain, containing the given bytes (content).
     The blob is returned as a tuple, containing the header of the blob
@@ -372,14 +404,14 @@ The blob list is empty if the content fits into the blob header.</p></div>
     payload = header + ptr
     assert len(payload) == 48, &#34;blob header must be 48B&#34;
     pkt = Packet(fid, seq, prev_mid,
-                 payload, pkt_type=PacketType.chain20)
+                 payload, pkt_type=PacketType.chain20, skey=skey)
 
     chain.reverse()
     return (pkt, chain)</code></pre>
 </details>
 </dd>
 <dt id="packet.create_child_pkt"><code class="name flex">
-<span>def <span class="ident">create_child_pkt</span></span>(<span>fid: bytes, payload: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
+<span>def <span class="ident">create_child_pkt</span></span>(<span>fid: bytes, payload: bytes, skey: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates and returns the first packet of a new child feed.
@@ -389,7 +421,7 @@ packet type 'ischild'.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_child_pkt(fid: bytes, payload: bytes) -&gt; Packet:
+<pre><code class="python">def create_child_pkt(fid: bytes, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the first packet of a new child feed.
     Starts with sequence number 1 and has
@@ -398,11 +430,11 @@ packet type 'ischild'.</p></div>
     seq = (1).to_bytes(4, &#34;big&#34;)
     prev_mid = fid[:20]
     return Packet(fid, seq, prev_mid,
-                  payload, pkt_type=PacketType.ischild)</code></pre>
+                  payload, pkt_type=PacketType.ischild, skey=skey)</code></pre>
 </details>
 </dd>
 <dt id="packet.create_contn_pkt"><code class="name flex">
-<span>def <span class="ident">create_contn_pkt</span></span>(<span>fid: bytes, payload: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
+<span>def <span class="ident">create_contn_pkt</span></span>(<span>fid: bytes, payload: bytes, skey: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates and returns the first packet of a continuation feed.
@@ -411,7 +443,7 @@ Starts at sequence number 1 and has packet type 'iscontn'.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_contn_pkt(fid: bytes, payload: bytes) -&gt; Packet:
+<pre><code class="python">def create_contn_pkt(fid: bytes, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the first packet of a continuation feed.
     Starts at sequence number 1 and has packet type &#39;iscontn&#39;.
@@ -419,11 +451,11 @@ Starts at sequence number 1 and has packet type 'iscontn'.</p></div>
     seq = (1).to_bytes(4, &#34;big&#34;)
     prev_mid = fid[:20]
     return Packet(fid, seq, prev_mid,
-                  payload, pkt_type=PacketType.iscontn)</code></pre>
+                  payload, pkt_type=PacketType.iscontn, skey=skey)</code></pre>
 </details>
 </dd>
 <dt id="packet.create_end_pkt"><code class="name flex">
-<span>def <span class="ident">create_end_pkt</span></span>(<span>fid: bytes, seq: bytes, prev_mid: bytes, contn_fid: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
+<span>def <span class="ident">create_end_pkt</span></span>(<span>fid: bytes, seq: bytes, prev_mid: bytes, contn_fid: bytes, skey: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates and returns the last packet of a feed.
@@ -434,7 +466,8 @@ Has packet type 'contdas'.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def create_end_pkt(fid: bytes, seq: bytes,
-                   prev_mid: bytes, contn_fid: bytes) -&gt; Packet:
+                   prev_mid: bytes, contn_fid: bytes,
+                   skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the last packet of a feed.
     Contains information of the continuing feed.
@@ -442,11 +475,11 @@ Has packet type 'contdas'.</p></div>
     &#34;&#34;&#34;
     # TODO: maybe add time stamp?
     return Packet(fid, seq, prev_mid,
-                  payload=contn_fid, pkt_type=PacketType.contdas)</code></pre>
+                  payload=contn_fid, pkt_type=PacketType.contdas, skey=skey)</code></pre>
 </details>
 </dd>
 <dt id="packet.create_genesis_pkt"><code class="name flex">
-<span>def <span class="ident">create_genesis_pkt</span></span>(<span>fid: bytes, payload: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
+<span>def <span class="ident">create_genesis_pkt</span></span>(<span>fid: bytes, payload: bytes, skey: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates and returns a 'self-signed' Packet instance
@@ -457,7 +490,7 @@ Used when creating new feeds.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_genesis_pkt(fid: bytes, payload: bytes) -&gt; Packet:
+<pre><code class="python">def create_genesis_pkt(fid: bytes, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns a &#39;self-signed&#39; Packet instance
     with sequence number of 1.
@@ -466,11 +499,11 @@ Used when creating new feeds.</p></div>
     &#34;&#34;&#34;
     seq = (1).to_bytes(4, &#34;big&#34;)  # seq numbers start at 1
     prev_mid = fid[:20]  # tiny ssb convention
-    return Packet(fid, seq, prev_mid, payload)</code></pre>
+    return Packet(fid, seq, prev_mid, payload, skey=skey)</code></pre>
 </details>
 </dd>
 <dt id="packet.create_parent_pkt"><code class="name flex">
-<span>def <span class="ident">create_parent_pkt</span></span>(<span>fid: bytes, seq: bytes, prev_mid: bytes, child_fid: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
+<span>def <span class="ident">create_parent_pkt</span></span>(<span>fid: bytes, seq: bytes, prev_mid: bytes, child_fid: bytes, skey: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates and returns a packet instance of type 'mkchild'.
@@ -482,7 +515,8 @@ as it contains information about the child feed.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def create_parent_pkt(fid: bytes, seq: bytes,
-                      prev_mid: bytes, child_fid: bytes) -&gt; Packet:
+                      prev_mid: bytes, child_fid: bytes,
+                      skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns a packet instance of type &#39;mkchild&#39;.
     Is used in parent feed, to refer to child feed.
@@ -491,11 +525,11 @@ as it contains information about the child feed.</p></div>
     &#34;&#34;&#34;
     # TODO: maybe add time stamp?
     return Packet(fid, seq, prev_mid,
-                  payload=child_fid, pkt_type=PacketType.mkchild)</code></pre>
+                  payload=child_fid, pkt_type=PacketType.mkchild, skey=skey)</code></pre>
 </details>
 </dd>
 <dt id="packet.create_succ"><code class="name flex">
-<span>def <span class="ident">create_succ</span></span>(<span>prev: <a title="packet.Packet" href="#packet.Packet">Packet</a>, payload: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
+<span>def <span class="ident">create_succ</span></span>(<span>prev: <a title="packet.Packet" href="#packet.Packet">Packet</a>, payload: bytes, skey: bytes) ‑> <a title="packet.Packet" href="#packet.Packet">Packet</a></span>
 </code></dt>
 <dd>
 <div class="desc"><p>Creates and returns the successor of the given packet,
@@ -504,13 +538,15 @@ containing the given payload.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def create_succ(prev: Packet, payload: bytes) -&gt; Packet:
+<pre><code class="python">def create_succ(prev: Packet, payload: bytes, skey: bytes) -&gt; Packet:
     &#34;&#34;&#34;
     Creates and returns the successor of the given packet,
     containing the given payload.
     &#34;&#34;&#34;
+    assert prev.mid is not None, &#34;previous packet must be signed&#34;
     seq = int.from_bytes(prev.seq, &#34;big&#34;) + 1
-    return Packet(prev.fid, (seq).to_bytes(4, &#34;big&#34;), prev.mid, payload)</code></pre>
+    return Packet(prev.fid, (seq).to_bytes(4, &#34;big&#34;),
+                  prev.mid, payload, skey=skey)</code></pre>
 </details>
 </dd>
 <dt id="packet.dmx"><code class="name flex">
@@ -527,7 +563,7 @@ containing the given payload.</p></div>
     Calculates and returns the dmx value for the given name.
     &#34;&#34;&#34;
     block_name = Packet.prefix + name
-    return Packet.crypto.hash(block_name)[:7]</code></pre>
+    return hashlib.sha256(block_name).digest()[:7]</code></pre>
 </details>
 </dd>
 <dt id="packet.pkt_from_bytes"><code class="name flex">
@@ -551,6 +587,7 @@ If the signatures do not match, 'None' is returned.</p></div>
     If the signatures do not match, &#39;None&#39; is returned.
     &#34;&#34;&#34;
     assert len(raw_pkt) == 120, &#34;raw packet length must be 120B&#34;
+    assert len(fid) == 32, &#34;feed id must be 32B&#34;
     # dmx = raw_pkt[:7]
     pkt_type = raw_pkt[7:8]
     payload = raw_pkt[8:56]
@@ -558,11 +595,17 @@ If the signatures do not match, 'None' is returned.</p></div>
 
     pkt = Packet(fid, seq, prev_mid, payload, pkt_type=pkt_type)
 
-    # confirm packet
-    if signature != pkt.signature:
+    # use fid as verification key
+    if verify_elliptic(pkt._expand(), signature, fid):
+        pkt = Packet(fid, seq, prev_mid, payload, pkt_type=pkt_type)
+        # fill-in signature and calculate missing info
+        pkt.signature = signature
+        pkt.mid = pkt._calc_mid()
+        pkt.wire = raw_pkt
+        return pkt
+    else:
         print(&#34;packet not trusted&#34;)
-        return None
-    return pkt</code></pre>
+        return None</code></pre>
 </details>
 </dd>
 </dl>
@@ -575,7 +618,7 @@ If the signatures do not match, 'None' is returned.</p></div>
 <span>(</span><span>payload: bytes, ptr: bytes)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Simple class for handeling blob information.
+<div class="desc"><p>Simple class for handling blob information.
 Not used for first blob entry (Packet).</p></div>
 <details class="source">
 <summary>
@@ -583,7 +626,7 @@ Not used for first blob entry (Packet).</p></div>
 </summary>
 <pre><code class="python">class Blob:
     &#34;&#34;&#34;
-    Simple class for handeling blob information.
+    Simple class for handling blob information.
     Not used for first blob entry (Packet).
     &#34;&#34;&#34;
 
@@ -591,17 +634,17 @@ Not used for first blob entry (Packet).</p></div>
         self.payload = payload
         self.ptr = ptr
         self.wire = payload + ptr
-        self.signature = Packet.crypto.hash(self.wire)[:20]</code></pre>
+        self.signature = hashlib.sha256(self.wire).digest()[:20]</code></pre>
 </details>
 </dd>
 <dt id="packet.Packet"><code class="flex name class">
 <span>class <span class="ident">Packet</span></span>
-<span>(</span><span>fid: bytes, seq: bytes, prev_mid: bytes, payload: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00', pkt_type: int = b'\x00', key: bytes = None)</span>
+<span>(</span><span>fid: bytes, seq: bytes, prev_mid: bytes, payload: bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00', pkt_type: bytes = b'\x00', skey: bytes = None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Contains all the information as defined in tiny-ssb protocol.
 Contains bytes payload and feed information.
-The hashing and signing algorithms can be changed thorugh the
+The hashing and signing algorithms can be changed through the
 'hash_algo' and 'sign_algo' fields.
 The maximum payload size of a packet is 48B.</p></div>
 <details class="source">
@@ -612,26 +655,23 @@ The maximum payload size of a packet is 48B.</p></div>
     &#34;&#34;&#34;
     Contains all the information as defined in tiny-ssb protocol.
     Contains bytes payload and feed information.
-    The hashing and signing algorithms can be changed thorugh the
+    The hashing and signing algorithms can be changed through the
     &#39;hash_algo&#39; and &#39;sign_algo&#39; fields.
     The maximum payload size of a packet is 48B.
     &#34;&#34;&#34;
 
-    prefix = b&#34;tiny-v01&#34;  # len must be 8B
-    secret = b&#34;bad secret&#34;  # default key
-    crypto = Crypto(secret)
+    prefix = b&#34;tiny-v01&#34;  # length must be 8B
 
     def __init__(self, fid: bytes, seq: bytes,
                  prev_mid: bytes, payload: bytes = bytes(48),
-                 pkt_type: int = PacketType.plain48, key: bytes = None):
-
-        # update key if needed
-        if key is not None:
-            self.crypto.update_key(key)
+                 pkt_type: bytes = PacketType.plain48,
+                 skey: bytes = None):
 
         assert len(fid) == 32, &#34;fid must be 32B&#34;
         assert len(seq) == 4, &#34;sequence number must be 4B&#34;
         assert len(prev_mid) == 20, &#34;previous msg_id must be 20B&#34;
+        if skey is not None:
+            assert len(skey) == 32, &#34;signing key must be 32B&#34;
         # make sure that payload is 48 bytes, rejected if too long
         if payload is None:
             payload = bytes(48)
@@ -647,10 +687,16 @@ The maximum payload size of a packet is 48B.</p></div>
         self.prev_mid = prev_mid
         self.payload = payload
         self.pkt_type = pkt_type
+        self.skey = skey
         self.dmx = self._calc_dmx()
-        self.signature = self._calc_signature()
-        self.mid = self._calc_mid()
-        self.wire = self._get_wire()
+        if self.skey is None:
+            self.signature = None
+            self.mid = None
+            self.wire = None
+        else:
+            self.signature = self._calc_signature()
+            self.mid = self._calc_mid()
+            self.wire = self._get_wire()
 
     def __repr__(self):
         s = &#34;packet(\nfeed_id:{},\nseq:{},\n&#34;.format(self.fid,
@@ -667,14 +713,17 @@ The maximum payload size of a packet is 48B.</p></div>
         &#34;&#34;&#34;
         Calculates the demultiplexing field of the packet.
         &#34;&#34;&#34;
-        return self.crypto.hash(self.block_name)[:7]
+        return hashlib.sha256(self.block_name).digest()[:7]
 
     def next_dmx(self) -&gt; bytes:
         &#34;&#34;&#34;
         Predicts the next packet&#39;s dmx value.
         &#34;&#34;&#34;
-        next = self.fid + (self.seq + 1).to_bytes(4, &#34;big&#34;) + self.mid
-        return self.crypto.hash(next)[:20]
+        assert self.mid is not None, &#34;sign packet first&#34;
+
+        next_seq = int.from_bytes(self.seq, &#34;big&#34;) + 1
+        next = self.fid + next_seq.to_bytes(4, &#34;big&#34;) + self.mid
+        return hashlib.sha256(next).digest()[:20]
 
     def _expand(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -688,7 +737,8 @@ The maximum payload size of a packet is 48B.</p></div>
         For now, sha256 HMAC using symmetric key is used.
         Can be swapped out through &#39;sign_algo&#39; field.
         &#34;&#34;&#34;
-        return self.crypto.sign(self._expand())
+        assert self.skey is not None, &#34;key needed for signing&#34;
+        return sign_elliptic(self.skey, self._expand())
 
     def _get_full(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -696,6 +746,8 @@ The maximum payload size of a packet is 48B.</p></div>
         Consists of the expanded block and
         the signature of the packet.
         &#34;&#34;&#34;
+        if self.signature is not None:
+            return self._expand() + self.signature
         return self._expand() + self._calc_signature()
 
     def _calc_mid(self) -&gt; bytes:
@@ -703,7 +755,7 @@ The maximum payload size of a packet is 48B.</p></div>
         Computes the 20B message ID of the packet.
         This message ID is referenced in the next packet.
         &#34;&#34;&#34;
-        return self.crypto.hash(self._get_full())[:20]
+        return hashlib.sha256(self._get_full()).digest()[:20]
 
     def _get_wire(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -711,19 +763,21 @@ The maximum payload size of a packet is 48B.</p></div>
         The missing &#39;virtual&#39; information can be infereed by
         the recipient using prior packets.
         &#34;&#34;&#34;
-        return self.dmx + self.pkt_type + self.payload + self.signature</code></pre>
+        assert self.signature is not None, &#34;sign packet first&#34;
+        return self.dmx + self.pkt_type + self.payload + self.signature
+
+    def sign(self, skey: bytes = bytes(0)) -&gt; None:
+        &#34;&#34;&#34;Calculates the signature of the Packet and all the related fields
+        using the provided signing key&#34;&#34;&#34;
+        assert len(skey) == 32, &#34;skey must be 32B&#34;
+        self.skey = skey
+        self.signature = self._calc_signature()
+        self.mid = self._calc_mid()
+        self.wire = self._get_wire()</code></pre>
 </details>
 <h3>Class variables</h3>
 <dl>
-<dt id="packet.Packet.crypto"><code class="name">var <span class="ident">crypto</span></code></dt>
-<dd>
-<div class="desc"></div>
-</dd>
 <dt id="packet.Packet.prefix"><code class="name">var <span class="ident">prefix</span></code></dt>
-<dd>
-<div class="desc"></div>
-</dd>
-<dt id="packet.Packet.secret"><code class="name">var <span class="ident">secret</span></code></dt>
 <dd>
 <div class="desc"></div>
 </dd>
@@ -743,8 +797,31 @@ The maximum payload size of a packet is 48B.</p></div>
     &#34;&#34;&#34;
     Predicts the next packet&#39;s dmx value.
     &#34;&#34;&#34;
-    next = self.fid + (self.seq + 1).to_bytes(4, &#34;big&#34;) + self.mid
-    return self.crypto.hash(next)[:20]</code></pre>
+    assert self.mid is not None, &#34;sign packet first&#34;
+
+    next_seq = int.from_bytes(self.seq, &#34;big&#34;) + 1
+    next = self.fid + next_seq.to_bytes(4, &#34;big&#34;) + self.mid
+    return hashlib.sha256(next).digest()[:20]</code></pre>
+</details>
+</dd>
+<dt id="packet.Packet.sign"><code class="name flex">
+<span>def <span class="ident">sign</span></span>(<span>self, skey: bytes = b'') ‑> None</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Calculates the signature of the Packet and all the related fields
+using the provided signing key</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def sign(self, skey: bytes = bytes(0)) -&gt; None:
+    &#34;&#34;&#34;Calculates the signature of the Packet and all the related fields
+    using the provided signing key&#34;&#34;&#34;
+    assert len(skey) == 32, &#34;skey must be 32B&#34;
+    self.skey = skey
+    self.signature = self._calc_signature()
+    self.mid = self._calc_mid()
+    self.wire = self._get_wire()</code></pre>
 </details>
 </dd>
 </dl>
@@ -830,10 +907,9 @@ The maximum payload size of a packet is 48B.</p></div>
 <li>
 <h4><code><a title="packet.Packet" href="#packet.Packet">Packet</a></code></h4>
 <ul class="">
-<li><code><a title="packet.Packet.crypto" href="#packet.Packet.crypto">crypto</a></code></li>
 <li><code><a title="packet.Packet.next_dmx" href="#packet.Packet.next_dmx">next_dmx</a></code></li>
 <li><code><a title="packet.Packet.prefix" href="#packet.Packet.prefix">prefix</a></code></li>
-<li><code><a title="packet.Packet.secret" href="#packet.Packet.secret">secret</a></code></li>
+<li><code><a title="packet.Packet.sign" href="#packet.Packet.sign">sign</a></code></li>
 </ul>
 </li>
 <li>

@@ -27,6 +27,29 @@
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">import hashlib
+import pure25519
+
+
+def sign_elliptic(key: bytes, payload: bytes) -&gt; bytes:
+    &#34;&#34;&#34;creates a 64B elliptic curve signature of the given payload
+    using the secret key
+    can be confirmed using the corresponding public key&#34;&#34;&#34;
+    assert len(key) == 32, &#34;signing key must be 32B&#34;
+    skey = pure25519.SigningKey(key)
+    return skey.sign(payload)
+
+
+def verify_elliptic(msg: bytes, signature: bytes, key: bytes) -&gt; bool:
+    &#34;&#34;&#34;attempts to verify the given message and signature
+    returns True if successful&#34;&#34;&#34;
+    assert len(signature) == 64, &#34;signature must be 64B&#34;
+    assert len(key) == 32, &#34;key must be 32B&#34;
+    vkey = pure25519.VerifyingKey(key)
+    try:
+        vkey.verify(signature, msg)
+        return True
+    except Exception:
+        return False
 
 
 class Crypto:
@@ -110,6 +133,52 @@ class Crypto:
 <section>
 </section>
 <section>
+<h2 class="section-title" id="header-functions">Functions</h2>
+<dl>
+<dt id="crypto.sign_elliptic"><code class="name flex">
+<span>def <span class="ident">sign_elliptic</span></span>(<span>key: bytes, payload: bytes) ‑> bytes</span>
+</code></dt>
+<dd>
+<div class="desc"><p>creates a 64B elliptic curve signature of the given payload
+using the secret key
+can be confirmed using the corresponding public key</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def sign_elliptic(key: bytes, payload: bytes) -&gt; bytes:
+    &#34;&#34;&#34;creates a 64B elliptic curve signature of the given payload
+    using the secret key
+    can be confirmed using the corresponding public key&#34;&#34;&#34;
+    assert len(key) == 32, &#34;signing key must be 32B&#34;
+    skey = pure25519.SigningKey(key)
+    return skey.sign(payload)</code></pre>
+</details>
+</dd>
+<dt id="crypto.verify_elliptic"><code class="name flex">
+<span>def <span class="ident">verify_elliptic</span></span>(<span>msg: bytes, signature: bytes, key: bytes) ‑> bool</span>
+</code></dt>
+<dd>
+<div class="desc"><p>attempts to verify the given message and signature
+returns True if successful</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def verify_elliptic(msg: bytes, signature: bytes, key: bytes) -&gt; bool:
+    &#34;&#34;&#34;attempts to verify the given message and signature
+    returns True if successful&#34;&#34;&#34;
+    assert len(signature) == 64, &#34;signature must be 64B&#34;
+    assert len(key) == 32, &#34;key must be 32B&#34;
+    vkey = pure25519.VerifyingKey(key)
+    try:
+        vkey.verify(signature, msg)
+        return True
+    except Exception:
+        return False</code></pre>
+</details>
+</dd>
+</dl>
 </section>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
@@ -323,6 +392,12 @@ The ipad and opad are recomputed.</p></div>
 <ul></ul>
 </div>
 <ul id="index">
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="crypto.sign_elliptic" href="#crypto.sign_elliptic">sign_elliptic</a></code></li>
+<li><code><a title="crypto.verify_elliptic" href="#crypto.verify_elliptic">verify_elliptic</a></code></li>
+</ul>
+</li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>

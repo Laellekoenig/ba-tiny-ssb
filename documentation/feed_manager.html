@@ -35,17 +35,21 @@ from packet import create_parent_pkt
 from ssb_util import from_hex
 from ssb_util import is_file
 from ssb_util import to_hex
+from pure25519 import create_keypair
+from typing import Optional
 
 
 class FeedManager:
     &#34;&#34;&#34;
     Manages and creates Feed instances.
-    The path can be specified in the constructor with path=&#34;path&#34;
-    (TODO: test).
+    The path can be specified in the constructor with path=&#34;path&#34;.
+    Also takes an optional dictionary, containing feed IDs (as strings)
+    as keys with their signing keys (as strings) as values.
     &#34;&#34;&#34;
 
-    def __init__(self, path: str = &#34;&#34;):
+    def __init__(self, path: str = &#34;&#34;, keys: dict[str, str] = None):
         self.path = path
+        self.keys = keys
         self.feed_dir = self.path + &#34;_logs&#34;
         self.blob_dir = self.path + &#34;_blobs&#34;
         self._check_dirs()
@@ -59,7 +63,7 @@ class FeedManager:
 
     def _check_dirs(self):
         &#34;&#34;&#34;
-        Checks whether the _log and _blob firectories already exist.
+        Checks whether the _log and _blob directories already exist.
         If not, new directories are created.
         &#34;&#34;&#34;
         if not is_file(self.feed_dir):
@@ -67,7 +71,7 @@ class FeedManager:
         if not is_file(self.blob_dir):
             os.mkdir(self.blob_dir)
 
-    def _get_feeds(self) -&gt; [Feed]:
+    def _get_feeds(self) -&gt; list[Feed]:
         &#34;&#34;&#34;
         Reads all .log files in the self.feed_dir directory.
         Returns a list of all Feed instances.
@@ -76,16 +80,29 @@ class FeedManager:
         files = os.listdir(self.feed_dir)
         for f in files:
             if f.endswith(&#34;.log&#34;):
-                feeds.append(Feed(self.feed_dir + &#34;/&#34; + f))
+                skey = self._get_skey(f)
+                feeds.append(Feed(self.feed_dir + &#34;/&#34; + f, skey=skey))
 
         return feeds
+
+    def _get_skey(self, fn: str) -&gt; bytes:
+        &#34;&#34;&#34;
+        Checks whether the given file name has an associated signing key
+        in the self.keys dictionary.
+        &#34;&#34;&#34;
+        fid = fn.split(&#34;.&#34;)[0]
+        try:
+            assert self.keys is not None
+            return from_hex(self.keys[fid])
+        except Exception:
+            return None
 
     def get_feed(self, fid: bytes) -&gt; Feed:
         &#34;&#34;&#34;
         Searches for a specific Feed in self.feeds.
         The feed ID can be handed in as bytes, a hex string
         or a file name.
-        Retruns &#39;None&#39; if the feed cannot be found.
+        Returns &#39;None&#39; if the feed cannot be found.
         &#34;&#34;&#34;
         # transform to bytes
         if type(fid) is str:
@@ -101,27 +118,44 @@ class FeedManager:
         return None
 
     def create_feed(self,
-                        fid: bytes = None,
-                        trusted_seq: int = 0,
-                        trusted_mid: bytes = None,
-                        parent_seq: int = 0,
-                        parent_fid: bytes = bytes(32)) -&gt; Feed:
+                    fid: bytes = None,
+                    trusted_seq: int = 0,
+                    trusted_mid: bytes = None,
+                    parent_seq: int = 0,
+                    parent_fid: bytes = bytes(32)) -&gt; Feed:
         &#34;&#34;&#34;
         Creates a new Feed instance and adds it to self.feeds.
         The feed ID, trusted sequence number, trusted message ID,
         parent feed ID and parent sequence number can be explicitly
         specified.
         If no feed ID is specified, a random one is generated.
+        The randomly generated feed_id is also the verification key.
+        The secret signing key is added to the self.keys dict.
         Returns the newly created Feed instance.
         &#34;&#34;&#34;
         if fid is None:
-            fid = os.urandom(32)
+            keys, _= create_keypair()
+            skey = keys.sk_s[:32]
+            fid = keys.vk_s
+
+            if self.keys is None:
+                self.keys = {}
+            self.keys[to_hex(fid)] = to_hex(skey)
+        else:
+            skey = None
 
         if trusted_mid is None:
             trusted_mid = fid[:20]  # tinyssb convention, self-signed
 
-        trusted_seq = trusted_seq.to_bytes(4, &#34;big&#34;)
-        parent_seq = parent_seq.to_bytes(4, &#34;big&#34;)
+        if type(trusted_seq) is int:
+            trusted_seq = trusted_seq.to_bytes(4, &#34;big&#34;)
+        if type(parent_seq) is int:
+            parent_seq = parent_seq.to_bytes(4, &#34;big&#34;)
+        if trusted_mid is None:
+            trusted_mid = bytes(20)
+
+        assert type(trusted_seq) is bytes
+        assert type(parent_seq) is bytes
 
         assert len(fid) == 32, &#34;fid must be 32b&#34;
         assert len(trusted_seq) == 4, &#34;trusted seq must be 4b&#34;
@@ -145,7 +179,7 @@ class FeedManager:
         f.write(header)
         f.close()
 
-        feed = Feed(file_name)
+        feed = Feed(file_name, skey=skey)
         self.feeds.append(feed)
         return feed
 
@@ -165,23 +199,31 @@ class FeedManager:
         if parent is None:
             return None
 
+        assert parent.skey is not None, &#34;must have signing key of parent&#34;
+        assert parent.front_mid is not None
+
         if child_fid is None:
             child_fid = os.urandom(32)
 
         # add child info to parent
         parent_seq = (parent.front_seq + 1).to_bytes(4, &#34;big&#34;)
         parent_pkt = create_parent_pkt(parent.fid, parent_seq,
-                                       parent.front_mid, child_fid)
+                                       parent.front_mid, child_fid,
+                                       parent.skey)
+
+        assert parent_pkt.wire is not None, &#34;failed to sign packet&#34;
         parent.append_pkt(parent_pkt)
 
         # create child feed
         child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
         child_feed = self.create_feed(child_fid,
-                                          parent_fid=parent.fid,
-                                          parent_seq=parent.front_seq)
+                                      parent_fid=parent.fid,
+                                      parent_seq=parent.front_seq)
 
-        child_pkt = create_child_pkt(child_feed.fid, child_payload)
+        assert child_feed is not None, &#34;failed to create child feed&#34;
+        child_pkt = create_child_pkt(child_feed.fid, child_payload,
+                                     parent.skey)  # for now, key of parent
         child_feed.append_pkt(child_pkt)
         return child_feed
 
@@ -198,7 +240,8 @@ class FeedManager:
         else:
             ending_feed = self.get_feed(end_fid)
 
-        if ending_feed is None:
+        if (ending_feed is None or ending_feed.front_mid is None
+                or ending_feed.skey is None):
             return None
 
         if contn_fid is None:
@@ -206,7 +249,10 @@ class FeedManager:
 
         end_seq = (ending_feed.front_seq + 1).to_bytes(4, &#34;big&#34;)
         end_pkt = create_end_pkt(ending_feed.fid, end_seq,
-                                 ending_feed.front_mid, contn_fid)
+                                 ending_feed.front_mid, contn_fid,
+                                 ending_feed.skey)
+
+        assert end_pkt.wire is not None, &#34;failed to sign ending packet&#34;
 
         ending_feed.append_pkt(end_pkt)
         # create continuing feed
@@ -215,8 +261,10 @@ class FeedManager:
         contn_feed = self.create_feed(contn_fid,
                                           parent_fid=ending_feed.fid,
                                           parent_seq=ending_feed.front_seq)
+        assert contn_feed is not None, &#34;failed to create continuation feed&#34;
 
-        contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload)
+        contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload,
+                                     ending_feed.skey)
         contn_feed.append_pkt(contn_pkt)
         return contn_feed</code></pre>
 </details>
@@ -232,12 +280,13 @@ class FeedManager:
 <dl>
 <dt id="feed_manager.FeedManager"><code class="flex name class">
 <span>class <span class="ident">FeedManager</span></span>
-<span>(</span><span>path: str = '')</span>
+<span>(</span><span>path: str = '', keys: dict[str, str] = None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Manages and creates Feed instances.
-The path can be specified in the constructor with path="path"
-(TODO: test).</p></div>
+The path can be specified in the constructor with path="path".
+Also takes an optional dictionary, containing feed IDs (as strings)
+as keys with their signing keys (as strings) as values.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -245,12 +294,14 @@ The path can be specified in the constructor with path="path"
 <pre><code class="python">class FeedManager:
     &#34;&#34;&#34;
     Manages and creates Feed instances.
-    The path can be specified in the constructor with path=&#34;path&#34;
-    (TODO: test).
+    The path can be specified in the constructor with path=&#34;path&#34;.
+    Also takes an optional dictionary, containing feed IDs (as strings)
+    as keys with their signing keys (as strings) as values.
     &#34;&#34;&#34;
 
-    def __init__(self, path: str = &#34;&#34;):
+    def __init__(self, path: str = &#34;&#34;, keys: dict[str, str] = None):
         self.path = path
+        self.keys = keys
         self.feed_dir = self.path + &#34;_logs&#34;
         self.blob_dir = self.path + &#34;_blobs&#34;
         self._check_dirs()
@@ -264,7 +315,7 @@ The path can be specified in the constructor with path="path"
 
     def _check_dirs(self):
         &#34;&#34;&#34;
-        Checks whether the _log and _blob firectories already exist.
+        Checks whether the _log and _blob directories already exist.
         If not, new directories are created.
         &#34;&#34;&#34;
         if not is_file(self.feed_dir):
@@ -272,7 +323,7 @@ The path can be specified in the constructor with path="path"
         if not is_file(self.blob_dir):
             os.mkdir(self.blob_dir)
 
-    def _get_feeds(self) -&gt; [Feed]:
+    def _get_feeds(self) -&gt; list[Feed]:
         &#34;&#34;&#34;
         Reads all .log files in the self.feed_dir directory.
         Returns a list of all Feed instances.
@@ -281,16 +332,29 @@ The path can be specified in the constructor with path="path"
         files = os.listdir(self.feed_dir)
         for f in files:
             if f.endswith(&#34;.log&#34;):
-                feeds.append(Feed(self.feed_dir + &#34;/&#34; + f))
+                skey = self._get_skey(f)
+                feeds.append(Feed(self.feed_dir + &#34;/&#34; + f, skey=skey))
 
         return feeds
+
+    def _get_skey(self, fn: str) -&gt; bytes:
+        &#34;&#34;&#34;
+        Checks whether the given file name has an associated signing key
+        in the self.keys dictionary.
+        &#34;&#34;&#34;
+        fid = fn.split(&#34;.&#34;)[0]
+        try:
+            assert self.keys is not None
+            return from_hex(self.keys[fid])
+        except Exception:
+            return None
 
     def get_feed(self, fid: bytes) -&gt; Feed:
         &#34;&#34;&#34;
         Searches for a specific Feed in self.feeds.
         The feed ID can be handed in as bytes, a hex string
         or a file name.
-        Retruns &#39;None&#39; if the feed cannot be found.
+        Returns &#39;None&#39; if the feed cannot be found.
         &#34;&#34;&#34;
         # transform to bytes
         if type(fid) is str:
@@ -306,27 +370,44 @@ The path can be specified in the constructor with path="path"
         return None
 
     def create_feed(self,
-                        fid: bytes = None,
-                        trusted_seq: int = 0,
-                        trusted_mid: bytes = None,
-                        parent_seq: int = 0,
-                        parent_fid: bytes = bytes(32)) -&gt; Feed:
+                    fid: bytes = None,
+                    trusted_seq: int = 0,
+                    trusted_mid: bytes = None,
+                    parent_seq: int = 0,
+                    parent_fid: bytes = bytes(32)) -&gt; Feed:
         &#34;&#34;&#34;
         Creates a new Feed instance and adds it to self.feeds.
         The feed ID, trusted sequence number, trusted message ID,
         parent feed ID and parent sequence number can be explicitly
         specified.
         If no feed ID is specified, a random one is generated.
+        The randomly generated feed_id is also the verification key.
+        The secret signing key is added to the self.keys dict.
         Returns the newly created Feed instance.
         &#34;&#34;&#34;
         if fid is None:
-            fid = os.urandom(32)
+            keys, _= create_keypair()
+            skey = keys.sk_s[:32]
+            fid = keys.vk_s
+
+            if self.keys is None:
+                self.keys = {}
+            self.keys[to_hex(fid)] = to_hex(skey)
+        else:
+            skey = None
 
         if trusted_mid is None:
             trusted_mid = fid[:20]  # tinyssb convention, self-signed
 
-        trusted_seq = trusted_seq.to_bytes(4, &#34;big&#34;)
-        parent_seq = parent_seq.to_bytes(4, &#34;big&#34;)
+        if type(trusted_seq) is int:
+            trusted_seq = trusted_seq.to_bytes(4, &#34;big&#34;)
+        if type(parent_seq) is int:
+            parent_seq = parent_seq.to_bytes(4, &#34;big&#34;)
+        if trusted_mid is None:
+            trusted_mid = bytes(20)
+
+        assert type(trusted_seq) is bytes
+        assert type(parent_seq) is bytes
 
         assert len(fid) == 32, &#34;fid must be 32b&#34;
         assert len(trusted_seq) == 4, &#34;trusted seq must be 4b&#34;
@@ -350,7 +431,7 @@ The path can be specified in the constructor with path="path"
         f.write(header)
         f.close()
 
-        feed = Feed(file_name)
+        feed = Feed(file_name, skey=skey)
         self.feeds.append(feed)
         return feed
 
@@ -370,23 +451,31 @@ The path can be specified in the constructor with path="path"
         if parent is None:
             return None
 
+        assert parent.skey is not None, &#34;must have signing key of parent&#34;
+        assert parent.front_mid is not None
+
         if child_fid is None:
             child_fid = os.urandom(32)
 
         # add child info to parent
         parent_seq = (parent.front_seq + 1).to_bytes(4, &#34;big&#34;)
         parent_pkt = create_parent_pkt(parent.fid, parent_seq,
-                                       parent.front_mid, child_fid)
+                                       parent.front_mid, child_fid,
+                                       parent.skey)
+
+        assert parent_pkt.wire is not None, &#34;failed to sign packet&#34;
         parent.append_pkt(parent_pkt)
 
         # create child feed
         child_payload = parent_pkt.fid + parent_pkt.seq
         child_payload += parent_pkt.wire[-12:]
         child_feed = self.create_feed(child_fid,
-                                          parent_fid=parent.fid,
-                                          parent_seq=parent.front_seq)
+                                      parent_fid=parent.fid,
+                                      parent_seq=parent.front_seq)
 
-        child_pkt = create_child_pkt(child_feed.fid, child_payload)
+        assert child_feed is not None, &#34;failed to create child feed&#34;
+        child_pkt = create_child_pkt(child_feed.fid, child_payload,
+                                     parent.skey)  # for now, key of parent
         child_feed.append_pkt(child_pkt)
         return child_feed
 
@@ -403,7 +492,8 @@ The path can be specified in the constructor with path="path"
         else:
             ending_feed = self.get_feed(end_fid)
 
-        if ending_feed is None:
+        if (ending_feed is None or ending_feed.front_mid is None
+                or ending_feed.skey is None):
             return None
 
         if contn_fid is None:
@@ -411,7 +501,10 @@ The path can be specified in the constructor with path="path"
 
         end_seq = (ending_feed.front_seq + 1).to_bytes(4, &#34;big&#34;)
         end_pkt = create_end_pkt(ending_feed.fid, end_seq,
-                                 ending_feed.front_mid, contn_fid)
+                                 ending_feed.front_mid, contn_fid,
+                                 ending_feed.skey)
+
+        assert end_pkt.wire is not None, &#34;failed to sign ending packet&#34;
 
         ending_feed.append_pkt(end_pkt)
         # create continuing feed
@@ -420,8 +513,10 @@ The path can be specified in the constructor with path="path"
         contn_feed = self.create_feed(contn_fid,
                                           parent_fid=ending_feed.fid,
                                           parent_seq=ending_feed.front_seq)
+        assert contn_feed is not None, &#34;failed to create continuation feed&#34;
 
-        contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload)
+        contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload,
+                                     ending_feed.skey)
         contn_feed.append_pkt(contn_pkt)
         return contn_feed</code></pre>
 </details>
@@ -455,23 +550,31 @@ The child feed ID can be explicitly definied.</p></div>
     if parent is None:
         return None
 
+    assert parent.skey is not None, &#34;must have signing key of parent&#34;
+    assert parent.front_mid is not None
+
     if child_fid is None:
         child_fid = os.urandom(32)
 
     # add child info to parent
     parent_seq = (parent.front_seq + 1).to_bytes(4, &#34;big&#34;)
     parent_pkt = create_parent_pkt(parent.fid, parent_seq,
-                                   parent.front_mid, child_fid)
+                                   parent.front_mid, child_fid,
+                                   parent.skey)
+
+    assert parent_pkt.wire is not None, &#34;failed to sign packet&#34;
     parent.append_pkt(parent_pkt)
 
     # create child feed
     child_payload = parent_pkt.fid + parent_pkt.seq
     child_payload += parent_pkt.wire[-12:]
     child_feed = self.create_feed(child_fid,
-                                      parent_fid=parent.fid,
-                                      parent_seq=parent.front_seq)
+                                  parent_fid=parent.fid,
+                                  parent_seq=parent.front_seq)
 
-    child_pkt = create_child_pkt(child_feed.fid, child_payload)
+    assert child_feed is not None, &#34;failed to create child feed&#34;
+    child_pkt = create_child_pkt(child_feed.fid, child_payload,
+                                 parent.skey)  # for now, key of parent
     child_feed.append_pkt(child_pkt)
     return child_feed</code></pre>
 </details>
@@ -501,7 +604,8 @@ The continuation feed ID can be explicitly defined.</p></div>
     else:
         ending_feed = self.get_feed(end_fid)
 
-    if ending_feed is None:
+    if (ending_feed is None or ending_feed.front_mid is None
+            or ending_feed.skey is None):
         return None
 
     if contn_fid is None:
@@ -509,7 +613,10 @@ The continuation feed ID can be explicitly defined.</p></div>
 
     end_seq = (ending_feed.front_seq + 1).to_bytes(4, &#34;big&#34;)
     end_pkt = create_end_pkt(ending_feed.fid, end_seq,
-                             ending_feed.front_mid, contn_fid)
+                             ending_feed.front_mid, contn_fid,
+                             ending_feed.skey)
+
+    assert end_pkt.wire is not None, &#34;failed to sign ending packet&#34;
 
     ending_feed.append_pkt(end_pkt)
     # create continuing feed
@@ -518,8 +625,10 @@ The continuation feed ID can be explicitly defined.</p></div>
     contn_feed = self.create_feed(contn_fid,
                                       parent_fid=ending_feed.fid,
                                       parent_seq=ending_feed.front_seq)
+    assert contn_feed is not None, &#34;failed to create continuation feed&#34;
 
-    contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload)
+    contn_pkt = create_contn_pkt(contn_feed.fid, contn_payload,
+                                 ending_feed.skey)
     contn_feed.append_pkt(contn_pkt)
     return contn_feed</code></pre>
 </details>
@@ -533,33 +642,52 @@ The feed ID, trusted sequence number, trusted message ID,
 parent feed ID and parent sequence number can be explicitly
 specified.
 If no feed ID is specified, a random one is generated.
+The randomly generated feed_id is also the verification key.
+The secret signing key is added to the self.keys dict.
 Returns the newly created Feed instance.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def create_feed(self,
-                    fid: bytes = None,
-                    trusted_seq: int = 0,
-                    trusted_mid: bytes = None,
-                    parent_seq: int = 0,
-                    parent_fid: bytes = bytes(32)) -&gt; Feed:
+                fid: bytes = None,
+                trusted_seq: int = 0,
+                trusted_mid: bytes = None,
+                parent_seq: int = 0,
+                parent_fid: bytes = bytes(32)) -&gt; Feed:
     &#34;&#34;&#34;
     Creates a new Feed instance and adds it to self.feeds.
     The feed ID, trusted sequence number, trusted message ID,
     parent feed ID and parent sequence number can be explicitly
     specified.
     If no feed ID is specified, a random one is generated.
+    The randomly generated feed_id is also the verification key.
+    The secret signing key is added to the self.keys dict.
     Returns the newly created Feed instance.
     &#34;&#34;&#34;
     if fid is None:
-        fid = os.urandom(32)
+        keys, _= create_keypair()
+        skey = keys.sk_s[:32]
+        fid = keys.vk_s
+
+        if self.keys is None:
+            self.keys = {}
+        self.keys[to_hex(fid)] = to_hex(skey)
+    else:
+        skey = None
 
     if trusted_mid is None:
         trusted_mid = fid[:20]  # tinyssb convention, self-signed
 
-    trusted_seq = trusted_seq.to_bytes(4, &#34;big&#34;)
-    parent_seq = parent_seq.to_bytes(4, &#34;big&#34;)
+    if type(trusted_seq) is int:
+        trusted_seq = trusted_seq.to_bytes(4, &#34;big&#34;)
+    if type(parent_seq) is int:
+        parent_seq = parent_seq.to_bytes(4, &#34;big&#34;)
+    if trusted_mid is None:
+        trusted_mid = bytes(20)
+
+    assert type(trusted_seq) is bytes
+    assert type(parent_seq) is bytes
 
     assert len(fid) == 32, &#34;fid must be 32b&#34;
     assert len(trusted_seq) == 4, &#34;trusted seq must be 4b&#34;
@@ -583,7 +711,7 @@ Returns the newly created Feed instance.</p></div>
     f.write(header)
     f.close()
 
-    feed = Feed(file_name)
+    feed = Feed(file_name, skey=skey)
     self.feeds.append(feed)
     return feed</code></pre>
 </details>
@@ -595,7 +723,7 @@ Returns the newly created Feed instance.</p></div>
 <div class="desc"><p>Searches for a specific Feed in self.feeds.
 The feed ID can be handed in as bytes, a hex string
 or a file name.
-Retruns 'None' if the feed cannot be found.</p></div>
+Returns 'None' if the feed cannot be found.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -605,7 +733,7 @@ Retruns 'None' if the feed cannot be found.</p></div>
     Searches for a specific Feed in self.feeds.
     The feed ID can be handed in as bytes, a hex string
     or a file name.
-    Retruns &#39;None&#39; if the feed cannot be found.
+    Returns &#39;None&#39; if the feed cannot be found.
     &#34;&#34;&#34;
     # transform to bytes
     if type(fid) is str:

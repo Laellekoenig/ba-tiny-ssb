@@ -1,4 +1,27 @@
 import hashlib
+import pure25519
+
+
+def sign_elliptic(key: bytes, payload: bytes) -> bytes:
+    """creates a 64B elliptic curve signature of the given payload
+    using the secret key
+    can be confirmed using the corresponding public key"""
+    assert len(key) == 32, "signing key must be 32B"
+    skey = pure25519.SigningKey(key)
+    return skey.sign(payload)
+
+
+def verify_elliptic(msg: bytes, signature: bytes, key: bytes) -> bool:
+    """attempts to verify the given message and signature
+    returns True if successful"""
+    assert len(signature) == 64, "signature must be 64B"
+    assert len(key) == 32, "key must be 32B"
+    vkey = pure25519.VerifyingKey(key)
+    try:
+        vkey.verify(signature, msg)
+        return True
+    except Exception:
+        return False
 
 
 class Crypto:

@@ -40,14 +40,15 @@ from ssb_util import to_hex
 class Feed:
     &#34;&#34;&#34;
     Represents a .log file.
-    Used to get/appennd data from/to feeds.
+    Used to get/append data from/to feeds.
     &#34;&#34;&#34;
 
-    def __init__(self, file_name: str):
+    def __init__(self, file_name: str, skey: bytes = None):
         self.file_name = file_name
         f = open(self.file_name, &#34;rb&#34;)
         header = f.read(128)
         f.close()
+        self.skey = skey
 
         # reserved = header[:12]
         self.fid = header[12:44]
@@ -57,71 +58,19 @@ class Feed:
         self.anchor_mid = header[84:104]
         self.front_seq = int.from_bytes(header[104:108], &#34;big&#34;)
         self.front_mid = header[108:128]
-        self._mids = self._get_mids()  # used for accessing packets quickly
 
     def __len__(self) -&gt; int:
         return self.front_seq
 
-    def __getitem__(self, seq: int) -&gt; Packet:
-        &#34;&#34;&#34;
-        Returns Packet instance with corresponding sequence number in feed.
-        Negative indices retrieve packets starting from
-        the latest sequence number.
-        Packets are confirmed before they are returned.
-        &#34;&#34;&#34;
-        if seq &lt; 0:
-            seq = self.front_seq + seq + 1  # access last pkt through -1 etc.
-        if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
-            raise IndexError
-
-        relative_seq = seq - self.anchor_seq
-        f = open(self.file_name, &#34;rb&#34;)
-        f.seek(128 * relative_seq)
-        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
-        f.close()
-
-        return pkt_from_bytes(self.fid, seq.to_bytes(4, &#34;big&#34;),
-                              self._mids[relative_seq - 1], raw_pkt)
-
-    def __iter__(self):
-        self._n = self.anchor_seq
-        return self
-
-    def __next__(self) -&gt; Packet:
-        self._n += 1
-        if self._n &gt; self.front_seq:
-            raise StopIteration
-
-        pkt = self[self._n]
-        return pkt
-
-    def get(self, i: int) -&gt; Packet:
-        &#34;&#34;&#34;
-        Returns Packet instance with corresponding sequence number in feed.
-        Identical to __getitem__.
-        &#34;&#34;&#34;
-        return self[i]
-
-    def get_bytes_quick(self, i: int) -&gt; bytes:
+    def __getitem__(self, seq: int) -&gt; bytes:
         &#34;&#34;&#34;
         Returns the payload of the packet with the corresponding
         sequence number.
         Negative indices access the feed from behind.
         The packet is NOT validated before the payload is returned.
-        This is quicker than get_bytes.
         Also returns full blobs, without verifying.
         &#34;&#34;&#34;
-        if i &lt; 0:
-            i = self.front_seq + i + 1  # access last pkt through -1 etc.
-        if i &gt; self.front_seq or i &lt;= self.anchor_seq:
-            raise IndexError
-
-        relative_i = i - self.anchor_seq
-        f = open(self.file_name, &#34;rb&#34;)
-        f.seek(128 * relative_i)
-        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
-        f.close()
-
+        raw_pkt = self.get_raw_pkt(seq)
         # dmx = raw_pkt[:7]
         pkt_type = raw_pkt[7:8]
         payload = raw_pkt[8:56]
@@ -135,63 +84,69 @@ class Feed:
         ptr = payload[-20:]
         while ptr != bytes(20):
             blob = self._get_blob(ptr)
+            assert blob is not None, &#34;failed to extract blob chain&#34;
             ptr = blob.ptr
             content += blob.payload
 
         return content[:size]
 
-    def get_bytes(self, i: int) -&gt; bytes:
+    def get_raw_pkt(self, seq: int) -&gt; bytes:
         &#34;&#34;&#34;
-        Returns the packet-specific payload as bytes.
-        The packet is validated before the payload is returned.
+        Returns the raw packet as bytes.
+        The raw packet consists of 8B placeholder and 120B packet wire format.
         &#34;&#34;&#34;
-        &#34;&#34;&#34;returns the packet-specific payload
-        returns full blob messages as bytes&#34;&#34;&#34;
-        # TODO: more packet-specific handeling
-        pkt = self[i]
-        if pkt is None:
+        if seq &lt; 0:
+            seq = self.front_seq + seq + 1  # access last pkt through -1 etc.
+        if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
+            raise IndexError
+
+        relative_i = seq- self.anchor_seq
+        f = open(self.file_name, &#34;rb&#34;)
+        f.seek(128 * relative_i)
+        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
+        f.close()
+
+        return raw_pkt
+
+    def get_pkt_type(self, seq: int) -&gt; bytes:
+        &#34;&#34;&#34;
+        Returns the type of the packet with given index.
+        Bytes can be compared with PacketTypes.
+        &#34;&#34;&#34;
+        raw_pkt = self.get_raw_pkt(seq)
+        pkt_type = raw_pkt[7:8]
+        types = [PacketType.chain20, PacketType.contdas, PacketType.ischild,
+                 PacketType.mkchild]
+        try:
+            return types[types.index(pkt_type)]
+        except Exception:
             return None
 
-        if pkt.pkt_type == PacketType.plain48:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.chain20:
-            return self.get_blob_chain(pkt)
-        if pkt.pkt_type == PacketType.ischild:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.iscontn:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.mkchild:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.contdas:
-            return pkt.payload
+    def __iter__(self):
+        self._n = self.anchor_seq
+        return self
 
-        return None
+    def __next__(self) -&gt; bytes:
+        self._n += 1
+        if self._n &gt; self.front_seq:
+            raise StopIteration
 
-    def _get_mids(self) -&gt; [bytes]:
+        payload = self[self._n]
+        return payload
+
+    def get(self, i: int) -&gt; bytes:
         &#34;&#34;&#34;
-        Loops over all feed entries (blocks)
-        and returns their message IDs as a list.
-        Used for speeding-up packet validation.
-        Confirms every packet in the feed.
+        Returns Packet instance with corresponding sequence number in feed.
+        Identical to __getitem__.
         &#34;&#34;&#34;
-        mids = [self.fid[:20]]
-        # TODO: error when packet cannot be confirmed
-        f = open(self.file_name, &#34;rb&#34;)
-        for i in range(self.anchor_seq + 1, self.front_seq + 1):
-            f.seek(128 * (i - self.anchor_seq))
-            raw_pkt = f.read(128)[8:]
-            pkt = pkt_from_bytes(self.fid, i.to_bytes(4, &#34;big&#34;),
-                                 mids[-1], raw_pkt)
-            mids.append(pkt.mid)
-
-        f.close()
-        return mids
+        return self[i]
 
     def _update_header(self) -&gt; None:
         &#34;&#34;&#34;
         Updates the front sequence number and message ID in the .log file
         with the current values of the instance.
         &#34;&#34;&#34;
+        assert type(self.front_mid) is bytes
         new_info = self.front_seq.to_bytes(4, &#34;big&#34;) + self.front_mid
         assert len(new_info) == 24, &#34;new front seq and mid must be 24B&#34;
         # go to beginning of file + 104B (where front seq and mid are)
@@ -217,11 +172,12 @@ class Feed:
             print(&#34;cannot append to finished feed&#34;)
             return False
 
-        # TODO: better error handeling
+        # TODO: better error handling
         if pkt is None:
             return False
 
         # go to end of buffer and write
+        assert pkt.wire is not None, &#34;packet must be signed before appended&#34;
         payload = bytes(8) + pkt.wire
         assert len(payload) == 128, &#34;wire pkt must be 128B&#34;
 
@@ -234,7 +190,6 @@ class Feed:
         self.front_seq += 1
         self.front_mid = pkt.mid
         self._update_header()
-        self._mids.append(pkt.mid)
         return True
 
     def append_bytes(self, payload: bytes) -&gt; bool:
@@ -246,8 +201,25 @@ class Feed:
         False is returned.
         &#34;&#34;&#34;
         next_seq = self.front_seq + 1
+        assert self.front_mid is not None
+        assert self.skey is not None, &#34;can only append if signing key known&#34;
         pkt = Packet(self.fid, next_seq.to_bytes(4, &#34;big&#34;),
-                     self.front_mid, payload)
+                     self.front_mid, payload, skey=self.skey)
+        if pkt is None:
+            return False
+
+        return self.append_pkt(pkt)
+
+    def verify_and_append_bytes(self, raw_pkt: bytes) -&gt; bool:
+        &#34;&#34;&#34;
+        Creates a new packet from the raw bytes and attempts to validate it.
+        Uses the feed_id as validation key.
+        If the packet does not validate, False is returned.
+        &#34;&#34;&#34;
+        seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
+        assert self.front_mid is not None
+        pkt = pkt_from_bytes(self.fid, seq, self.front_mid, raw_pkt)
+
         if pkt is None:
             return False
 
@@ -257,13 +229,16 @@ class Feed:
         &#34;&#34;&#34;
         Creates a blob from the provided payload.
         A packet of type &#39;chain20&#39; is appended to the feed,
-        refering to the blob files (in _blob directory).
+        referring to the blob files (in _blob directory).
         If the feed has ended, nothing is appended and
         False is returned.
         &#34;&#34;&#34;
         next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
+        assert self.front_mid is not None
+        assert self.skey is not None, &#34;can only append if signing key is known&#34;
         pkt, blobs = create_chain(self.fid, next_seq,
-                                  self.front_mid, payload)
+                                  self.front_mid, payload,
+                                  self.skey)
 
         if pkt is None:
             return False
@@ -271,7 +246,7 @@ class Feed:
         self.append_pkt(pkt)
         return self._write_blob(blobs)
 
-    def _write_blob(self, blobs: [Blob]) -&gt; bool:
+    def _write_blob(self, blobs: list[Blob]) -&gt; bool:
         &#34;&#34;&#34;
         Takes a list of blob instances and writes them
         to blob files, as defined in tiny-ssb protocol.
@@ -328,12 +303,13 @@ class Feed:
         ptr = pkt.payload[-20:]
         while ptr != bytes(20):
             blob = self._get_blob(ptr)
+            assert blob is not None, &#34;chaining of blobs failed&#34;
             ptr = blob.ptr
             blobs.append(blob)
 
         return self._verify_chain(pkt, blobs)
 
-    def _verify_chain(self, head: Packet, blobs: [Blob]) -&gt; bytes:
+    def _verify_chain(self, head: Packet, blobs: list[Blob]) -&gt; bytes:
         &#34;&#34;&#34;
         Verifies the authenticity of a given blob chain.
         If it is valid, the content is returned as bytes.
@@ -356,8 +332,7 @@ class Feed:
         &#34;&#34;&#34;
         if len(self) &lt; 1:
             return False
-        last_pkt = self[-1]
-        return last_pkt.pkt_type == PacketType.contdas
+        return self.get_pkt_type(-1) == PacketType.contdas
 
     def get_parent(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -367,56 +342,53 @@ class Feed:
         if self.anchor_seq != 0:
             return None
 
-        first_pkt = self[1]
-        if first_pkt.pkt_type != PacketType.ischild:
+        if self.get_pkt_type(1) != PacketType.ischild:
             return None
 
-        return first_pkt.payload[:32]
+        # parent fid == first 32B of payload in first pkt
+        return self[1][:32]
 
-    def get_children(self) -&gt; [bytes]:
+    def get_children(self) -&gt; list[bytes]:
         &#34;&#34;&#34;
         Returns a list of all child feed IDs contained
         within this feed.
         &#34;&#34;&#34;
         children = []
-        for pkt in self:
-            if pkt.pkt_type == PacketType.mkchild:
-                children.append(pkt)
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            if self.get_pkt_type(i) == PacketType.mkchild:
+                children.append(self[i][:32])
 
-        # extract feed ids
-        return [pkt.payload[:32] for pkt in children]
+        return children
 
     def get_contn(self) -&gt; bytes:
         &#34;&#34;&#34;
         Returns the feed ID of this feed&#39;s continuation feed.
         If this feed has not ended, &#39;None&#39; is returned.
         &#34;&#34;&#34;
-        last_pkt = self[-1]
-        if last_pkt.pkt_type != PacketType.contdas:
+        if self.get_pkt_type(-1) == PacketType.contdas:
+            return self[-1][:32]
+        else:
             return None
-
-        return last_pkt.payload[:32]
 
     def get_prev(self) -&gt; bytes:
         &#34;&#34;&#34;
         Returns the feed ID of this feed&#39;s predecessor feed.
         If this feed does not have a predecessor, &#39;None&#39; is returned.
         &#34;&#34;&#34;
-        try:
-            first_pkt = self[1]
-        except Exception:
+        if self.anchor_seq != 0:
             return None
 
-        if first_pkt.pkt_type != PacketType.iscontn:
+        if self.get_pkt_type(1) == PacketType.iscontn:
+            return self[1][:32]
+        else:
             return None
 
-        return first_pkt.payload[:32]
-
-    def get_front(self) -&gt; (int, bytes):
+    def get_front(self) -&gt; tuple[int, bytes]:
         &#34;&#34;&#34;
         Returns this feed&#39;s front sequence number and front message ID
         in a tuple.
         &#34;&#34;&#34;
+        assert self.front_mid is not None
         return (self.front_seq, self.front_mid)</code></pre>
 </details>
 </section>
@@ -431,11 +403,11 @@ class Feed:
 <dl>
 <dt id="feed.Feed"><code class="flex name class">
 <span>class <span class="ident">Feed</span></span>
-<span>(</span><span>file_name: str)</span>
+<span>(</span><span>file_name: str, skey: bytes = None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Represents a .log file.
-Used to get/appennd data from/to feeds.</p></div>
+Used to get/append data from/to feeds.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -443,14 +415,15 @@ Used to get/appennd data from/to feeds.</p></div>
 <pre><code class="python">class Feed:
     &#34;&#34;&#34;
     Represents a .log file.
-    Used to get/appennd data from/to feeds.
+    Used to get/append data from/to feeds.
     &#34;&#34;&#34;
 
-    def __init__(self, file_name: str):
+    def __init__(self, file_name: str, skey: bytes = None):
         self.file_name = file_name
         f = open(self.file_name, &#34;rb&#34;)
         header = f.read(128)
         f.close()
+        self.skey = skey
 
         # reserved = header[:12]
         self.fid = header[12:44]
@@ -460,71 +433,19 @@ Used to get/appennd data from/to feeds.</p></div>
         self.anchor_mid = header[84:104]
         self.front_seq = int.from_bytes(header[104:108], &#34;big&#34;)
         self.front_mid = header[108:128]
-        self._mids = self._get_mids()  # used for accessing packets quickly
 
     def __len__(self) -&gt; int:
         return self.front_seq
 
-    def __getitem__(self, seq: int) -&gt; Packet:
-        &#34;&#34;&#34;
-        Returns Packet instance with corresponding sequence number in feed.
-        Negative indices retrieve packets starting from
-        the latest sequence number.
-        Packets are confirmed before they are returned.
-        &#34;&#34;&#34;
-        if seq &lt; 0:
-            seq = self.front_seq + seq + 1  # access last pkt through -1 etc.
-        if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
-            raise IndexError
-
-        relative_seq = seq - self.anchor_seq
-        f = open(self.file_name, &#34;rb&#34;)
-        f.seek(128 * relative_seq)
-        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
-        f.close()
-
-        return pkt_from_bytes(self.fid, seq.to_bytes(4, &#34;big&#34;),
-                              self._mids[relative_seq - 1], raw_pkt)
-
-    def __iter__(self):
-        self._n = self.anchor_seq
-        return self
-
-    def __next__(self) -&gt; Packet:
-        self._n += 1
-        if self._n &gt; self.front_seq:
-            raise StopIteration
-
-        pkt = self[self._n]
-        return pkt
-
-    def get(self, i: int) -&gt; Packet:
-        &#34;&#34;&#34;
-        Returns Packet instance with corresponding sequence number in feed.
-        Identical to __getitem__.
-        &#34;&#34;&#34;
-        return self[i]
-
-    def get_bytes_quick(self, i: int) -&gt; bytes:
+    def __getitem__(self, seq: int) -&gt; bytes:
         &#34;&#34;&#34;
         Returns the payload of the packet with the corresponding
         sequence number.
         Negative indices access the feed from behind.
         The packet is NOT validated before the payload is returned.
-        This is quicker than get_bytes.
         Also returns full blobs, without verifying.
         &#34;&#34;&#34;
-        if i &lt; 0:
-            i = self.front_seq + i + 1  # access last pkt through -1 etc.
-        if i &gt; self.front_seq or i &lt;= self.anchor_seq:
-            raise IndexError
-
-        relative_i = i - self.anchor_seq
-        f = open(self.file_name, &#34;rb&#34;)
-        f.seek(128 * relative_i)
-        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
-        f.close()
-
+        raw_pkt = self.get_raw_pkt(seq)
         # dmx = raw_pkt[:7]
         pkt_type = raw_pkt[7:8]
         payload = raw_pkt[8:56]
@@ -538,63 +459,69 @@ Used to get/appennd data from/to feeds.</p></div>
         ptr = payload[-20:]
         while ptr != bytes(20):
             blob = self._get_blob(ptr)
+            assert blob is not None, &#34;failed to extract blob chain&#34;
             ptr = blob.ptr
             content += blob.payload
 
         return content[:size]
 
-    def get_bytes(self, i: int) -&gt; bytes:
+    def get_raw_pkt(self, seq: int) -&gt; bytes:
         &#34;&#34;&#34;
-        Returns the packet-specific payload as bytes.
-        The packet is validated before the payload is returned.
+        Returns the raw packet as bytes.
+        The raw packet consists of 8B placeholder and 120B packet wire format.
         &#34;&#34;&#34;
-        &#34;&#34;&#34;returns the packet-specific payload
-        returns full blob messages as bytes&#34;&#34;&#34;
-        # TODO: more packet-specific handeling
-        pkt = self[i]
-        if pkt is None:
+        if seq &lt; 0:
+            seq = self.front_seq + seq + 1  # access last pkt through -1 etc.
+        if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
+            raise IndexError
+
+        relative_i = seq- self.anchor_seq
+        f = open(self.file_name, &#34;rb&#34;)
+        f.seek(128 * relative_i)
+        raw_pkt = f.read(128)[8:]  # cut off reserved 8B
+        f.close()
+
+        return raw_pkt
+
+    def get_pkt_type(self, seq: int) -&gt; bytes:
+        &#34;&#34;&#34;
+        Returns the type of the packet with given index.
+        Bytes can be compared with PacketTypes.
+        &#34;&#34;&#34;
+        raw_pkt = self.get_raw_pkt(seq)
+        pkt_type = raw_pkt[7:8]
+        types = [PacketType.chain20, PacketType.contdas, PacketType.ischild,
+                 PacketType.mkchild]
+        try:
+            return types[types.index(pkt_type)]
+        except Exception:
             return None
 
-        if pkt.pkt_type == PacketType.plain48:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.chain20:
-            return self.get_blob_chain(pkt)
-        if pkt.pkt_type == PacketType.ischild:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.iscontn:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.mkchild:
-            return pkt.payload
-        if pkt.pkt_type == PacketType.contdas:
-            return pkt.payload
+    def __iter__(self):
+        self._n = self.anchor_seq
+        return self
 
-        return None
+    def __next__(self) -&gt; bytes:
+        self._n += 1
+        if self._n &gt; self.front_seq:
+            raise StopIteration
 
-    def _get_mids(self) -&gt; [bytes]:
+        payload = self[self._n]
+        return payload
+
+    def get(self, i: int) -&gt; bytes:
         &#34;&#34;&#34;
-        Loops over all feed entries (blocks)
-        and returns their message IDs as a list.
-        Used for speeding-up packet validation.
-        Confirms every packet in the feed.
+        Returns Packet instance with corresponding sequence number in feed.
+        Identical to __getitem__.
         &#34;&#34;&#34;
-        mids = [self.fid[:20]]
-        # TODO: error when packet cannot be confirmed
-        f = open(self.file_name, &#34;rb&#34;)
-        for i in range(self.anchor_seq + 1, self.front_seq + 1):
-            f.seek(128 * (i - self.anchor_seq))
-            raw_pkt = f.read(128)[8:]
-            pkt = pkt_from_bytes(self.fid, i.to_bytes(4, &#34;big&#34;),
-                                 mids[-1], raw_pkt)
-            mids.append(pkt.mid)
-
-        f.close()
-        return mids
+        return self[i]
 
     def _update_header(self) -&gt; None:
         &#34;&#34;&#34;
         Updates the front sequence number and message ID in the .log file
         with the current values of the instance.
         &#34;&#34;&#34;
+        assert type(self.front_mid) is bytes
         new_info = self.front_seq.to_bytes(4, &#34;big&#34;) + self.front_mid
         assert len(new_info) == 24, &#34;new front seq and mid must be 24B&#34;
         # go to beginning of file + 104B (where front seq and mid are)
@@ -620,11 +547,12 @@ Used to get/appennd data from/to feeds.</p></div>
             print(&#34;cannot append to finished feed&#34;)
             return False
 
-        # TODO: better error handeling
+        # TODO: better error handling
         if pkt is None:
             return False
 
         # go to end of buffer and write
+        assert pkt.wire is not None, &#34;packet must be signed before appended&#34;
         payload = bytes(8) + pkt.wire
         assert len(payload) == 128, &#34;wire pkt must be 128B&#34;
 
@@ -637,7 +565,6 @@ Used to get/appennd data from/to feeds.</p></div>
         self.front_seq += 1
         self.front_mid = pkt.mid
         self._update_header()
-        self._mids.append(pkt.mid)
         return True
 
     def append_bytes(self, payload: bytes) -&gt; bool:
@@ -649,8 +576,25 @@ Used to get/appennd data from/to feeds.</p></div>
         False is returned.
         &#34;&#34;&#34;
         next_seq = self.front_seq + 1
+        assert self.front_mid is not None
+        assert self.skey is not None, &#34;can only append if signing key known&#34;
         pkt = Packet(self.fid, next_seq.to_bytes(4, &#34;big&#34;),
-                     self.front_mid, payload)
+                     self.front_mid, payload, skey=self.skey)
+        if pkt is None:
+            return False
+
+        return self.append_pkt(pkt)
+
+    def verify_and_append_bytes(self, raw_pkt: bytes) -&gt; bool:
+        &#34;&#34;&#34;
+        Creates a new packet from the raw bytes and attempts to validate it.
+        Uses the feed_id as validation key.
+        If the packet does not validate, False is returned.
+        &#34;&#34;&#34;
+        seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
+        assert self.front_mid is not None
+        pkt = pkt_from_bytes(self.fid, seq, self.front_mid, raw_pkt)
+
         if pkt is None:
             return False
 
@@ -660,13 +604,16 @@ Used to get/appennd data from/to feeds.</p></div>
         &#34;&#34;&#34;
         Creates a blob from the provided payload.
         A packet of type &#39;chain20&#39; is appended to the feed,
-        refering to the blob files (in _blob directory).
+        referring to the blob files (in _blob directory).
         If the feed has ended, nothing is appended and
         False is returned.
         &#34;&#34;&#34;
         next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
+        assert self.front_mid is not None
+        assert self.skey is not None, &#34;can only append if signing key is known&#34;
         pkt, blobs = create_chain(self.fid, next_seq,
-                                  self.front_mid, payload)
+                                  self.front_mid, payload,
+                                  self.skey)
 
         if pkt is None:
             return False
@@ -674,7 +621,7 @@ Used to get/appennd data from/to feeds.</p></div>
         self.append_pkt(pkt)
         return self._write_blob(blobs)
 
-    def _write_blob(self, blobs: [Blob]) -&gt; bool:
+    def _write_blob(self, blobs: list[Blob]) -&gt; bool:
         &#34;&#34;&#34;
         Takes a list of blob instances and writes them
         to blob files, as defined in tiny-ssb protocol.
@@ -731,12 +678,13 @@ Used to get/appennd data from/to feeds.</p></div>
         ptr = pkt.payload[-20:]
         while ptr != bytes(20):
             blob = self._get_blob(ptr)
+            assert blob is not None, &#34;chaining of blobs failed&#34;
             ptr = blob.ptr
             blobs.append(blob)
 
         return self._verify_chain(pkt, blobs)
 
-    def _verify_chain(self, head: Packet, blobs: [Blob]) -&gt; bytes:
+    def _verify_chain(self, head: Packet, blobs: list[Blob]) -&gt; bytes:
         &#34;&#34;&#34;
         Verifies the authenticity of a given blob chain.
         If it is valid, the content is returned as bytes.
@@ -759,8 +707,7 @@ Used to get/appennd data from/to feeds.</p></div>
         &#34;&#34;&#34;
         if len(self) &lt; 1:
             return False
-        last_pkt = self[-1]
-        return last_pkt.pkt_type == PacketType.contdas
+        return self.get_pkt_type(-1) == PacketType.contdas
 
     def get_parent(self) -&gt; bytes:
         &#34;&#34;&#34;
@@ -770,56 +717,53 @@ Used to get/appennd data from/to feeds.</p></div>
         if self.anchor_seq != 0:
             return None
 
-        first_pkt = self[1]
-        if first_pkt.pkt_type != PacketType.ischild:
+        if self.get_pkt_type(1) != PacketType.ischild:
             return None
 
-        return first_pkt.payload[:32]
+        # parent fid == first 32B of payload in first pkt
+        return self[1][:32]
 
-    def get_children(self) -&gt; [bytes]:
+    def get_children(self) -&gt; list[bytes]:
         &#34;&#34;&#34;
         Returns a list of all child feed IDs contained
         within this feed.
         &#34;&#34;&#34;
         children = []
-        for pkt in self:
-            if pkt.pkt_type == PacketType.mkchild:
-                children.append(pkt)
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            if self.get_pkt_type(i) == PacketType.mkchild:
+                children.append(self[i][:32])
 
-        # extract feed ids
-        return [pkt.payload[:32] for pkt in children]
+        return children
 
     def get_contn(self) -&gt; bytes:
         &#34;&#34;&#34;
         Returns the feed ID of this feed&#39;s continuation feed.
         If this feed has not ended, &#39;None&#39; is returned.
         &#34;&#34;&#34;
-        last_pkt = self[-1]
-        if last_pkt.pkt_type != PacketType.contdas:
+        if self.get_pkt_type(-1) == PacketType.contdas:
+            return self[-1][:32]
+        else:
             return None
-
-        return last_pkt.payload[:32]
 
     def get_prev(self) -&gt; bytes:
         &#34;&#34;&#34;
         Returns the feed ID of this feed&#39;s predecessor feed.
         If this feed does not have a predecessor, &#39;None&#39; is returned.
         &#34;&#34;&#34;
-        try:
-            first_pkt = self[1]
-        except Exception:
+        if self.anchor_seq != 0:
             return None
 
-        if first_pkt.pkt_type != PacketType.iscontn:
+        if self.get_pkt_type(1) == PacketType.iscontn:
+            return self[1][:32]
+        else:
             return None
 
-        return first_pkt.payload[:32]
-
-    def get_front(self) -&gt; (int, bytes):
+    def get_front(self) -&gt; tuple[int, bytes]:
         &#34;&#34;&#34;
         Returns this feed&#39;s front sequence number and front message ID
         in a tuple.
         &#34;&#34;&#34;
+        assert self.front_mid is not None
         return (self.front_seq, self.front_mid)</code></pre>
 </details>
 <h3>Methods</h3>
@@ -830,7 +774,7 @@ Used to get/appennd data from/to feeds.</p></div>
 <dd>
 <div class="desc"><p>Creates a blob from the provided payload.
 A packet of type 'chain20' is appended to the feed,
-refering to the blob files (in _blob directory).
+referring to the blob files (in _blob directory).
 If the feed has ended, nothing is appended and
 False is returned.</p></div>
 <details class="source">
@@ -841,13 +785,16 @@ False is returned.</p></div>
     &#34;&#34;&#34;
     Creates a blob from the provided payload.
     A packet of type &#39;chain20&#39; is appended to the feed,
-    refering to the blob files (in _blob directory).
+    referring to the blob files (in _blob directory).
     If the feed has ended, nothing is appended and
     False is returned.
     &#34;&#34;&#34;
     next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
+    assert self.front_mid is not None
+    assert self.skey is not None, &#34;can only append if signing key is known&#34;
     pkt, blobs = create_chain(self.fid, next_seq,
-                              self.front_mid, payload)
+                              self.front_mid, payload,
+                              self.skey)
 
     if pkt is None:
         return False
@@ -878,8 +825,10 @@ False is returned.</p></div>
     False is returned.
     &#34;&#34;&#34;
     next_seq = self.front_seq + 1
+    assert self.front_mid is not None
+    assert self.skey is not None, &#34;can only append if signing key known&#34;
     pkt = Packet(self.fid, next_seq.to_bytes(4, &#34;big&#34;),
-                 self.front_mid, payload)
+                 self.front_mid, payload, skey=self.skey)
     if pkt is None:
         return False
 
@@ -911,11 +860,12 @@ False is returned.</p></div>
         print(&#34;cannot append to finished feed&#34;)
         return False
 
-    # TODO: better error handeling
+    # TODO: better error handling
     if pkt is None:
         return False
 
     # go to end of buffer and write
+    assert pkt.wire is not None, &#34;packet must be signed before appended&#34;
     payload = bytes(8) + pkt.wire
     assert len(payload) == 128, &#34;wire pkt must be 128B&#34;
 
@@ -928,12 +878,11 @@ False is returned.</p></div>
     self.front_seq += 1
     self.front_mid = pkt.mid
     self._update_header()
-    self._mids.append(pkt.mid)
     return True</code></pre>
 </details>
 </dd>
 <dt id="feed.Feed.get"><code class="name flex">
-<span>def <span class="ident">get</span></span>(<span>self, i: int) ‑> packet.Packet</span>
+<span>def <span class="ident">get</span></span>(<span>self, i: int) ‑> bytes</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Returns Packet instance with corresponding sequence number in feed.
@@ -942,7 +891,7 @@ Identical to <strong>getitem</strong>.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get(self, i: int) -&gt; Packet:
+<pre><code class="python">def get(self, i: int) -&gt; bytes:
     &#34;&#34;&#34;
     Returns Packet instance with corresponding sequence number in feed.
     Identical to __getitem__.
@@ -973,105 +922,15 @@ If validation fails, 'None' is returned.</p></div>
     ptr = pkt.payload[-20:]
     while ptr != bytes(20):
         blob = self._get_blob(ptr)
+        assert blob is not None, &#34;chaining of blobs failed&#34;
         ptr = blob.ptr
         blobs.append(blob)
 
     return self._verify_chain(pkt, blobs)</code></pre>
 </details>
 </dd>
-<dt id="feed.Feed.get_bytes"><code class="name flex">
-<span>def <span class="ident">get_bytes</span></span>(<span>self, i: int) ‑> bytes</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Returns the packet-specific payload as bytes.
-The packet is validated before the payload is returned.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_bytes(self, i: int) -&gt; bytes:
-    &#34;&#34;&#34;
-    Returns the packet-specific payload as bytes.
-    The packet is validated before the payload is returned.
-    &#34;&#34;&#34;
-    &#34;&#34;&#34;returns the packet-specific payload
-    returns full blob messages as bytes&#34;&#34;&#34;
-    # TODO: more packet-specific handeling
-    pkt = self[i]
-    if pkt is None:
-        return None
-
-    if pkt.pkt_type == PacketType.plain48:
-        return pkt.payload
-    if pkt.pkt_type == PacketType.chain20:
-        return self.get_blob_chain(pkt)
-    if pkt.pkt_type == PacketType.ischild:
-        return pkt.payload
-    if pkt.pkt_type == PacketType.iscontn:
-        return pkt.payload
-    if pkt.pkt_type == PacketType.mkchild:
-        return pkt.payload
-    if pkt.pkt_type == PacketType.contdas:
-        return pkt.payload
-
-    return None</code></pre>
-</details>
-</dd>
-<dt id="feed.Feed.get_bytes_quick"><code class="name flex">
-<span>def <span class="ident">get_bytes_quick</span></span>(<span>self, i: int) ‑> bytes</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Returns the payload of the packet with the corresponding
-sequence number.
-Negative indices access the feed from behind.
-The packet is NOT validated before the payload is returned.
-This is quicker than get_bytes.
-Also returns full blobs, without verifying.</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_bytes_quick(self, i: int) -&gt; bytes:
-    &#34;&#34;&#34;
-    Returns the payload of the packet with the corresponding
-    sequence number.
-    Negative indices access the feed from behind.
-    The packet is NOT validated before the payload is returned.
-    This is quicker than get_bytes.
-    Also returns full blobs, without verifying.
-    &#34;&#34;&#34;
-    if i &lt; 0:
-        i = self.front_seq + i + 1  # access last pkt through -1 etc.
-    if i &gt; self.front_seq or i &lt;= self.anchor_seq:
-        raise IndexError
-
-    relative_i = i - self.anchor_seq
-    f = open(self.file_name, &#34;rb&#34;)
-    f.seek(128 * relative_i)
-    raw_pkt = f.read(128)[8:]  # cut off reserved 8B
-    f.close()
-
-    # dmx = raw_pkt[:7]
-    pkt_type = raw_pkt[7:8]
-    payload = raw_pkt[8:56]
-    if pkt_type != PacketType.chain20:
-        return payload
-
-    # blob chain
-    size, num_bytes = from_var_int(payload)
-    content = payload[num_bytes:-20]
-
-    ptr = payload[-20:]
-    while ptr != bytes(20):
-        blob = self._get_blob(ptr)
-        ptr = blob.ptr
-        content += blob.payload
-
-    return content[:size]</code></pre>
-</details>
-</dd>
 <dt id="feed.Feed.get_children"><code class="name flex">
-<span>def <span class="ident">get_children</span></span>(<span>self) ‑> [<class 'bytes'>]</span>
+<span>def <span class="ident">get_children</span></span>(<span>self) ‑> list[bytes]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Returns a list of all child feed IDs contained
@@ -1080,18 +939,17 @@ within this feed.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_children(self) -&gt; [bytes]:
+<pre><code class="python">def get_children(self) -&gt; list[bytes]:
     &#34;&#34;&#34;
     Returns a list of all child feed IDs contained
     within this feed.
     &#34;&#34;&#34;
     children = []
-    for pkt in self:
-        if pkt.pkt_type == PacketType.mkchild:
-            children.append(pkt)
+    for i in range(self.anchor_seq + 1, self.front_seq + 1):
+        if self.get_pkt_type(i) == PacketType.mkchild:
+            children.append(self[i][:32])
 
-    # extract feed ids
-    return [pkt.payload[:32] for pkt in children]</code></pre>
+    return children</code></pre>
 </details>
 </dd>
 <dt id="feed.Feed.get_contn"><code class="name flex">
@@ -1109,15 +967,14 @@ If this feed has not ended, 'None' is returned.</p></div>
     Returns the feed ID of this feed&#39;s continuation feed.
     If this feed has not ended, &#39;None&#39; is returned.
     &#34;&#34;&#34;
-    last_pkt = self[-1]
-    if last_pkt.pkt_type != PacketType.contdas:
-        return None
-
-    return last_pkt.payload[:32]</code></pre>
+    if self.get_pkt_type(-1) == PacketType.contdas:
+        return self[-1][:32]
+    else:
+        return None</code></pre>
 </details>
 </dd>
 <dt id="feed.Feed.get_front"><code class="name flex">
-<span>def <span class="ident">get_front</span></span>(<span>self) ‑> (<class 'int'>, <class 'bytes'>)</span>
+<span>def <span class="ident">get_front</span></span>(<span>self) ‑> tuple[int, bytes]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Returns this feed's front sequence number and front message ID
@@ -1126,11 +983,12 @@ in a tuple.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_front(self) -&gt; (int, bytes):
+<pre><code class="python">def get_front(self) -&gt; tuple[int, bytes]:
     &#34;&#34;&#34;
     Returns this feed&#39;s front sequence number and front message ID
     in a tuple.
     &#34;&#34;&#34;
+    assert self.front_mid is not None
     return (self.front_seq, self.front_mid)</code></pre>
 </details>
 </dd>
@@ -1152,11 +1010,36 @@ If this is not a child feed, 'None' is returned.</p></div>
     if self.anchor_seq != 0:
         return None
 
-    first_pkt = self[1]
-    if first_pkt.pkt_type != PacketType.ischild:
+    if self.get_pkt_type(1) != PacketType.ischild:
         return None
 
-    return first_pkt.payload[:32]</code></pre>
+    # parent fid == first 32B of payload in first pkt
+    return self[1][:32]</code></pre>
+</details>
+</dd>
+<dt id="feed.Feed.get_pkt_type"><code class="name flex">
+<span>def <span class="ident">get_pkt_type</span></span>(<span>self, seq: int) ‑> bytes</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Returns the type of the packet with given index.
+Bytes can be compared with PacketTypes.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_pkt_type(self, seq: int) -&gt; bytes:
+    &#34;&#34;&#34;
+    Returns the type of the packet with given index.
+    Bytes can be compared with PacketTypes.
+    &#34;&#34;&#34;
+    raw_pkt = self.get_raw_pkt(seq)
+    pkt_type = raw_pkt[7:8]
+    types = [PacketType.chain20, PacketType.contdas, PacketType.ischild,
+             PacketType.mkchild]
+    try:
+        return types[types.index(pkt_type)]
+    except Exception:
+        return None</code></pre>
 </details>
 </dd>
 <dt id="feed.Feed.get_prev"><code class="name flex">
@@ -1174,15 +1057,42 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
     Returns the feed ID of this feed&#39;s predecessor feed.
     If this feed does not have a predecessor, &#39;None&#39; is returned.
     &#34;&#34;&#34;
-    try:
-        first_pkt = self[1]
-    except Exception:
+    if self.anchor_seq != 0:
         return None
 
-    if first_pkt.pkt_type != PacketType.iscontn:
-        return None
+    if self.get_pkt_type(1) == PacketType.iscontn:
+        return self[1][:32]
+    else:
+        return None</code></pre>
+</details>
+</dd>
+<dt id="feed.Feed.get_raw_pkt"><code class="name flex">
+<span>def <span class="ident">get_raw_pkt</span></span>(<span>self, seq: int) ‑> bytes</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Returns the raw packet as bytes.
+The raw packet consists of 8B placeholder and 120B packet wire format.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_raw_pkt(self, seq: int) -&gt; bytes:
+    &#34;&#34;&#34;
+    Returns the raw packet as bytes.
+    The raw packet consists of 8B placeholder and 120B packet wire format.
+    &#34;&#34;&#34;
+    if seq &lt; 0:
+        seq = self.front_seq + seq + 1  # access last pkt through -1 etc.
+    if seq &gt; self.front_seq or seq &lt;= self.anchor_seq:
+        raise IndexError
 
-    return first_pkt.payload[:32]</code></pre>
+    relative_i = seq- self.anchor_seq
+    f = open(self.file_name, &#34;rb&#34;)
+    f.seek(128 * relative_i)
+    raw_pkt = f.read(128)[8:]  # cut off reserved 8B
+    f.close()
+
+    return raw_pkt</code></pre>
 </details>
 </dd>
 <dt id="feed.Feed.has_ended"><code class="name flex">
@@ -1200,8 +1110,34 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
     &#34;&#34;&#34;
     if len(self) &lt; 1:
         return False
-    last_pkt = self[-1]
-    return last_pkt.pkt_type == PacketType.contdas</code></pre>
+    return self.get_pkt_type(-1) == PacketType.contdas</code></pre>
+</details>
+</dd>
+<dt id="feed.Feed.verify_and_append_bytes"><code class="name flex">
+<span>def <span class="ident">verify_and_append_bytes</span></span>(<span>self, raw_pkt: bytes) ‑> bool</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Creates a new packet from the raw bytes and attempts to validate it.
+Uses the feed_id as validation key.
+If the packet does not validate, False is returned.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def verify_and_append_bytes(self, raw_pkt: bytes) -&gt; bool:
+    &#34;&#34;&#34;
+    Creates a new packet from the raw bytes and attempts to validate it.
+    Uses the feed_id as validation key.
+    If the packet does not validate, False is returned.
+    &#34;&#34;&#34;
+    seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
+    assert self.front_mid is not None
+    pkt = pkt_from_bytes(self.fid, seq, self.front_mid, raw_pkt)
+
+    if pkt is None:
+        return False
+
+    return self.append_pkt(pkt)</code></pre>
 </details>
 </dd>
 </dl>
@@ -1219,20 +1155,21 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
 <ul>
 <li>
 <h4><code><a title="feed.Feed" href="#feed.Feed">Feed</a></code></h4>
-<ul class="two-column">
+<ul class="">
 <li><code><a title="feed.Feed.append_blob" href="#feed.Feed.append_blob">append_blob</a></code></li>
 <li><code><a title="feed.Feed.append_bytes" href="#feed.Feed.append_bytes">append_bytes</a></code></li>
 <li><code><a title="feed.Feed.append_pkt" href="#feed.Feed.append_pkt">append_pkt</a></code></li>
 <li><code><a title="feed.Feed.get" href="#feed.Feed.get">get</a></code></li>
 <li><code><a title="feed.Feed.get_blob_chain" href="#feed.Feed.get_blob_chain">get_blob_chain</a></code></li>
-<li><code><a title="feed.Feed.get_bytes" href="#feed.Feed.get_bytes">get_bytes</a></code></li>
-<li><code><a title="feed.Feed.get_bytes_quick" href="#feed.Feed.get_bytes_quick">get_bytes_quick</a></code></li>
 <li><code><a title="feed.Feed.get_children" href="#feed.Feed.get_children">get_children</a></code></li>
 <li><code><a title="feed.Feed.get_contn" href="#feed.Feed.get_contn">get_contn</a></code></li>
 <li><code><a title="feed.Feed.get_front" href="#feed.Feed.get_front">get_front</a></code></li>
 <li><code><a title="feed.Feed.get_parent" href="#feed.Feed.get_parent">get_parent</a></code></li>
+<li><code><a title="feed.Feed.get_pkt_type" href="#feed.Feed.get_pkt_type">get_pkt_type</a></code></li>
 <li><code><a title="feed.Feed.get_prev" href="#feed.Feed.get_prev">get_prev</a></code></li>
+<li><code><a title="feed.Feed.get_raw_pkt" href="#feed.Feed.get_raw_pkt">get_raw_pkt</a></code></li>
 <li><code><a title="feed.Feed.has_ended" href="#feed.Feed.has_ended">has_ended</a></code></li>
+<li><code><a title="feed.Feed.verify_and_append_bytes" href="#feed.Feed.verify_and_append_bytes">verify_and_append_bytes</a></code></li>
 </ul>
 </li>
 </ul>
