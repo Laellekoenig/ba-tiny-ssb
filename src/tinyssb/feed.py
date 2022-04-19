@@ -98,13 +98,13 @@ class Feed:
 
         return pkt_wire
 
-    def get_type(self, seq: int) -> Optional[int]:
+    def get_type(self, seq: int) -> Optional[bytes]:
         """
         Returns the type of the packet with given index.
         Bytes can be compared with PacketTypes.
         """
         pkt_wire = self.get_wire(seq)
-        pkt_type = int.from_bytes(pkt_wire[7:8], "big")
+        pkt_type = pkt_wire[7:8]
 
         if PacketType.is_type(pkt_type):
             return pkt_type

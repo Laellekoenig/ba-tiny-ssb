@@ -26,7 +26,7 @@ class PacketType:
     types = [plain48, chain20, ischild, iscontn, mkchild, contdas]
 
     @classmethod
-    def is_type(cls, t: int) -> bool:
+    def is_type(cls, t: bytes) -> bool:
         """
         Returns True if there exists a packet type with the same
         number as the given int.
