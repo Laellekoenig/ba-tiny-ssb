@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.10.0" />
-<title>crypto API documentation</title>
+<title>tinyssb.crypto API documentation</title>
 <meta name="description" content="" />
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
@@ -19,7 +19,7 @@
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>crypto</code></h1>
+<h1 class="title">Module <code>tinyssb.crypto</code></h1>
 </header>
 <section id="section-intro">
 <details class="source">
@@ -31,17 +31,17 @@ import pure25519
 
 
 def sign_elliptic(key: bytes, payload: bytes) -&gt; bytes:
-    &#34;&#34;&#34;creates a 64B elliptic curve signature of the given payload
-    using the secret key
-    can be confirmed using the corresponding public key&#34;&#34;&#34;
+    &#34;&#34;&#34;Creates a 64B elliptic curve signature of the given payload
+    using the provided secret key.
+    Can be verified using the corresponding public key.&#34;&#34;&#34;
     assert len(key) == 32, &#34;signing key must be 32B&#34;
     skey = pure25519.SigningKey(key)
     return skey.sign(payload)
 
 
 def verify_elliptic(msg: bytes, signature: bytes, key: bytes) -&gt; bool:
-    &#34;&#34;&#34;attempts to verify the given message and signature
-    returns True if successful&#34;&#34;&#34;
+    &#34;&#34;&#34;Attempts to verify the given message and signature.
+    Returns True if successful.&#34;&#34;&#34;
     assert len(signature) == 64, &#34;signature must be 64B&#34;
     assert len(key) == 32, &#34;key must be 32B&#34;
     vkey = pure25519.VerifyingKey(key)
@@ -56,8 +56,10 @@ class Crypto:
     &#34;&#34;&#34;
     Used for calculating HMAC signatures using sha256
     and a secret (symmetric) key.
+    Only holds one instance of a hash algorithm at any time in order to
+    work on Pycom devices.
+    Not used anymore (replaced by ed25519).
     &#34;&#34;&#34;
-
     sha256 = None
 
     def __init__(self, key: bytes = b&#34;bad key&#34;):
@@ -100,7 +102,6 @@ class Crypto:
         Computes the HMAC signature of the given bytes.
         Length of the output is 32B.
         &#34;&#34;&#34;
-
         # inner digest
         inner = self._ipad + msg
         self.sha256 = hashlib.sha256()
@@ -117,6 +118,9 @@ class Crypto:
         return hmac
 
     def hash(self, msg: bytes) -&gt; bytes:
+        &#34;&#34;&#34;
+        Hashes the given message using the sha256 algorithm.
+        &#34;&#34;&#34;
         self.sha256 = hashlib.sha256()
         self.sha256.update(msg)
         h = self.sha256.digest()
@@ -124,6 +128,11 @@ class Crypto:
         return h
 
     def sign(self, payload: bytes) -&gt; bytes:
+        &#34;&#34;&#34;
+        Uses sha256 HMAC to generate a signature of the given payload.
+        Uses symmetric keys.
+        The resulting 32B signature is padded to 64B -&gt; tinyssb.
+        &#34;&#34;&#34;
         hmac = self.get_signature(payload)
         return hmac + bytes(32)</code></pre>
 </details>
@@ -135,39 +144,39 @@ class Crypto:
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="crypto.sign_elliptic"><code class="name flex">
+<dt id="tinyssb.crypto.sign_elliptic"><code class="name flex">
 <span>def <span class="ident">sign_elliptic</span></span>(<span>key: bytes, payload: bytes) ‑> bytes</span>
 </code></dt>
 <dd>
-<div class="desc"><p>creates a 64B elliptic curve signature of the given payload
-using the secret key
-can be confirmed using the corresponding public key</p></div>
+<div class="desc"><p>Creates a 64B elliptic curve signature of the given payload
+using the provided secret key.
+Can be verified using the corresponding public key.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def sign_elliptic(key: bytes, payload: bytes) -&gt; bytes:
-    &#34;&#34;&#34;creates a 64B elliptic curve signature of the given payload
-    using the secret key
-    can be confirmed using the corresponding public key&#34;&#34;&#34;
+    &#34;&#34;&#34;Creates a 64B elliptic curve signature of the given payload
+    using the provided secret key.
+    Can be verified using the corresponding public key.&#34;&#34;&#34;
     assert len(key) == 32, &#34;signing key must be 32B&#34;
     skey = pure25519.SigningKey(key)
     return skey.sign(payload)</code></pre>
 </details>
 </dd>
-<dt id="crypto.verify_elliptic"><code class="name flex">
+<dt id="tinyssb.crypto.verify_elliptic"><code class="name flex">
 <span>def <span class="ident">verify_elliptic</span></span>(<span>msg: bytes, signature: bytes, key: bytes) ‑> bool</span>
 </code></dt>
 <dd>
-<div class="desc"><p>attempts to verify the given message and signature
-returns True if successful</p></div>
+<div class="desc"><p>Attempts to verify the given message and signature.
+Returns True if successful.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def verify_elliptic(msg: bytes, signature: bytes, key: bytes) -&gt; bool:
-    &#34;&#34;&#34;attempts to verify the given message and signature
-    returns True if successful&#34;&#34;&#34;
+    &#34;&#34;&#34;Attempts to verify the given message and signature.
+    Returns True if successful.&#34;&#34;&#34;
     assert len(signature) == 64, &#34;signature must be 64B&#34;
     assert len(key) == 32, &#34;key must be 32B&#34;
     vkey = pure25519.VerifyingKey(key)
@@ -183,13 +192,16 @@ returns True if successful</p></div>
 <section>
 <h2 class="section-title" id="header-classes">Classes</h2>
 <dl>
-<dt id="crypto.Crypto"><code class="flex name class">
+<dt id="tinyssb.crypto.Crypto"><code class="flex name class">
 <span>class <span class="ident">Crypto</span></span>
 <span>(</span><span>key: bytes = b'bad key')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Used for calculating HMAC signatures using sha256
-and a secret (symmetric) key.</p></div>
+and a secret (symmetric) key.
+Only holds one instance of a hash algorithm at any time in order to
+work on Pycom devices.
+Not used anymore (replaced by ed25519).</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -198,8 +210,10 @@ and a secret (symmetric) key.</p></div>
     &#34;&#34;&#34;
     Used for calculating HMAC signatures using sha256
     and a secret (symmetric) key.
+    Only holds one instance of a hash algorithm at any time in order to
+    work on Pycom devices.
+    Not used anymore (replaced by ed25519).
     &#34;&#34;&#34;
-
     sha256 = None
 
     def __init__(self, key: bytes = b&#34;bad key&#34;):
@@ -242,7 +256,6 @@ and a secret (symmetric) key.</p></div>
         Computes the HMAC signature of the given bytes.
         Length of the output is 32B.
         &#34;&#34;&#34;
-
         # inner digest
         inner = self._ipad + msg
         self.sha256 = hashlib.sha256()
@@ -259,6 +272,9 @@ and a secret (symmetric) key.</p></div>
         return hmac
 
     def hash(self, msg: bytes) -&gt; bytes:
+        &#34;&#34;&#34;
+        Hashes the given message using the sha256 algorithm.
+        &#34;&#34;&#34;
         self.sha256 = hashlib.sha256()
         self.sha256.update(msg)
         h = self.sha256.digest()
@@ -266,19 +282,24 @@ and a secret (symmetric) key.</p></div>
         return h
 
     def sign(self, payload: bytes) -&gt; bytes:
+        &#34;&#34;&#34;
+        Uses sha256 HMAC to generate a signature of the given payload.
+        Uses symmetric keys.
+        The resulting 32B signature is padded to 64B -&gt; tinyssb.
+        &#34;&#34;&#34;
         hmac = self.get_signature(payload)
         return hmac + bytes(32)</code></pre>
 </details>
 <h3>Class variables</h3>
 <dl>
-<dt id="crypto.Crypto.sha256"><code class="name">var <span class="ident">sha256</span></code></dt>
+<dt id="tinyssb.crypto.Crypto.sha256"><code class="name">var <span class="ident">sha256</span></code></dt>
 <dd>
 <div class="desc"></div>
 </dd>
 </dl>
 <h3>Methods</h3>
 <dl>
-<dt id="crypto.Crypto.get_key"><code class="name flex">
+<dt id="tinyssb.crypto.Crypto.get_key"><code class="name flex">
 <span>def <span class="ident">get_key</span></span>(<span>self) ‑> bytes</span>
 </code></dt>
 <dd>
@@ -298,7 +319,7 @@ have to be recomputed after the key is changed.</p></div>
     return self._key</code></pre>
 </details>
 </dd>
-<dt id="crypto.Crypto.get_signature"><code class="name flex">
+<dt id="tinyssb.crypto.Crypto.get_signature"><code class="name flex">
 <span>def <span class="ident">get_signature</span></span>(<span>self, msg: bytes) ‑> bytes</span>
 </code></dt>
 <dd>
@@ -313,7 +334,6 @@ Length of the output is 32B.</p></div>
     Computes the HMAC signature of the given bytes.
     Length of the output is 32B.
     &#34;&#34;&#34;
-
     # inner digest
     inner = self._ipad + msg
     self.sha256 = hashlib.sha256()
@@ -330,16 +350,19 @@ Length of the output is 32B.</p></div>
     return hmac</code></pre>
 </details>
 </dd>
-<dt id="crypto.Crypto.hash"><code class="name flex">
+<dt id="tinyssb.crypto.Crypto.hash"><code class="name flex">
 <span>def <span class="ident">hash</span></span>(<span>self, msg: bytes) ‑> bytes</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Hashes the given message using the sha256 algorithm.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def hash(self, msg: bytes) -&gt; bytes:
+    &#34;&#34;&#34;
+    Hashes the given message using the sha256 algorithm.
+    &#34;&#34;&#34;
     self.sha256 = hashlib.sha256()
     self.sha256.update(msg)
     h = self.sha256.digest()
@@ -347,21 +370,28 @@ Length of the output is 32B.</p></div>
     return h</code></pre>
 </details>
 </dd>
-<dt id="crypto.Crypto.sign"><code class="name flex">
+<dt id="tinyssb.crypto.Crypto.sign"><code class="name flex">
 <span>def <span class="ident">sign</span></span>(<span>self, payload: bytes) ‑> bytes</span>
 </code></dt>
 <dd>
-<div class="desc"></div>
+<div class="desc"><p>Uses sha256 HMAC to generate a signature of the given payload.
+Uses symmetric keys.
+The resulting 32B signature is padded to 64B -&gt; tinyssb.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def sign(self, payload: bytes) -&gt; bytes:
+    &#34;&#34;&#34;
+    Uses sha256 HMAC to generate a signature of the given payload.
+    Uses symmetric keys.
+    The resulting 32B signature is padded to 64B -&gt; tinyssb.
+    &#34;&#34;&#34;
     hmac = self.get_signature(payload)
     return hmac + bytes(32)</code></pre>
 </details>
 </dd>
-<dt id="crypto.Crypto.update_key"><code class="name flex">
+<dt id="tinyssb.crypto.Crypto.update_key"><code class="name flex">
 <span>def <span class="ident">update_key</span></span>(<span>self, key: bytes) ‑> None</span>
 </code></dt>
 <dd>
@@ -392,23 +422,28 @@ The ipad and opad are recomputed.</p></div>
 <ul></ul>
 </div>
 <ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="tinyssb" href="index.html">tinyssb</a></code></li>
+</ul>
+</li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="crypto.sign_elliptic" href="#crypto.sign_elliptic">sign_elliptic</a></code></li>
-<li><code><a title="crypto.verify_elliptic" href="#crypto.verify_elliptic">verify_elliptic</a></code></li>
+<li><code><a title="tinyssb.crypto.sign_elliptic" href="#tinyssb.crypto.sign_elliptic">sign_elliptic</a></code></li>
+<li><code><a title="tinyssb.crypto.verify_elliptic" href="#tinyssb.crypto.verify_elliptic">verify_elliptic</a></code></li>
 </ul>
 </li>
 <li><h3><a href="#header-classes">Classes</a></h3>
 <ul>
 <li>
-<h4><code><a title="crypto.Crypto" href="#crypto.Crypto">Crypto</a></code></h4>
+<h4><code><a title="tinyssb.crypto.Crypto" href="#tinyssb.crypto.Crypto">Crypto</a></code></h4>
 <ul class="two-column">
-<li><code><a title="crypto.Crypto.get_key" href="#crypto.Crypto.get_key">get_key</a></code></li>
-<li><code><a title="crypto.Crypto.get_signature" href="#crypto.Crypto.get_signature">get_signature</a></code></li>
-<li><code><a title="crypto.Crypto.hash" href="#crypto.Crypto.hash">hash</a></code></li>
-<li><code><a title="crypto.Crypto.sha256" href="#crypto.Crypto.sha256">sha256</a></code></li>
-<li><code><a title="crypto.Crypto.sign" href="#crypto.Crypto.sign">sign</a></code></li>
-<li><code><a title="crypto.Crypto.update_key" href="#crypto.Crypto.update_key">update_key</a></code></li>
+<li><code><a title="tinyssb.crypto.Crypto.get_key" href="#tinyssb.crypto.Crypto.get_key">get_key</a></code></li>
+<li><code><a title="tinyssb.crypto.Crypto.get_signature" href="#tinyssb.crypto.Crypto.get_signature">get_signature</a></code></li>
+<li><code><a title="tinyssb.crypto.Crypto.hash" href="#tinyssb.crypto.Crypto.hash">hash</a></code></li>
+<li><code><a title="tinyssb.crypto.Crypto.sha256" href="#tinyssb.crypto.Crypto.sha256">sha256</a></code></li>
+<li><code><a title="tinyssb.crypto.Crypto.sign" href="#tinyssb.crypto.Crypto.sign">sign</a></code></li>
+<li><code><a title="tinyssb.crypto.Crypto.update_key" href="#tinyssb.crypto.Crypto.update_key">update_key</a></code></li>
 </ul>
 </li>
 </ul>

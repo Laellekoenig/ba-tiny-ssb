@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
 <meta name="generator" content="pdoc 0.10.0" />
-<title>ssb_util API documentation</title>
+<title>tinyssb.ssb_util API documentation</title>
 <meta name="description" content="" />
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
 <link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
@@ -19,7 +19,7 @@
 <main>
 <article id="content">
 <header>
-<h1 class="title">Module <code>ssb_util</code></h1>
+<h1 class="title">Module <code>tinyssb.ssb_util</code></h1>
 </header>
 <section id="section-intro">
 <details class="source">
@@ -27,9 +27,16 @@
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">import os
-import binascii as bin
-# uncomment following line for micropython
-# import ubinascii as bin
+import sys
+
+
+if sys.implementation.name == &#34;micropython&#34;:
+    # micropython
+    import ubinascii as bin
+else:
+    # regular python
+    import binascii as bin
+    from typing import Tuple
 
 
 def is_file(file_name: str) -&gt; bool:
@@ -53,13 +60,13 @@ def is_file(file_name: str) -&gt; bool:
 
 def to_hex(b: bytes) -&gt; str:
     &#34;&#34;&#34;
-    Returns the bytes as a hex string.
+    Returns the given bytes as a hex string.
     &#34;&#34;&#34;
     return bin.hexlify(b).decode()
 
 
 def from_hex(s: str) -&gt; bytes:
-    &#34;&#34;&#34;Returns the hex string as bytes.&#34;&#34;&#34;
+    &#34;&#34;&#34;Returns the given hex string as bytes.&#34;&#34;&#34;
     return bin.unhexlify(s.encode())
 
 
@@ -80,7 +87,7 @@ def to_var_int(i: int) -&gt; bytes:
     return b&#34;\xff&#34; + i.to_bytes(8, &#34;little&#34;)
 
 
-def from_var_int(b: bytes) -&gt; (int, int):
+def from_var_int(b: bytes) -&gt; Tuple[int, int]:
     &#34;&#34;&#34;
     Transforms a &#39;Variable Integer&#39; back to its int representation.
     Returns the converted int and the number of bytes used by the VarInt
@@ -107,22 +114,22 @@ def from_var_int(b: bytes) -&gt; (int, int):
 <section>
 <h2 class="section-title" id="header-functions">Functions</h2>
 <dl>
-<dt id="ssb_util.from_hex"><code class="name flex">
+<dt id="tinyssb.ssb_util.from_hex"><code class="name flex">
 <span>def <span class="ident">from_hex</span></span>(<span>s: str) ‑> bytes</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns the hex string as bytes.</p></div>
+<div class="desc"><p>Returns the given hex string as bytes.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def from_hex(s: str) -&gt; bytes:
-    &#34;&#34;&#34;Returns the hex string as bytes.&#34;&#34;&#34;
+    &#34;&#34;&#34;Returns the given hex string as bytes.&#34;&#34;&#34;
     return bin.unhexlify(s.encode())</code></pre>
 </details>
 </dd>
-<dt id="ssb_util.from_var_int"><code class="name flex">
-<span>def <span class="ident">from_var_int</span></span>(<span>b: bytes) ‑> (<class 'int'>, <class 'int'>)</span>
+<dt id="tinyssb.ssb_util.from_var_int"><code class="name flex">
+<span>def <span class="ident">from_var_int</span></span>(<span>b: bytes) ‑> Tuple[int, int]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Transforms a 'Variable Integer' back to its int representation.
@@ -132,7 +139,7 @@ representation.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def from_var_int(b: bytes) -&gt; (int, int):
+<pre><code class="python">def from_var_int(b: bytes) -&gt; Tuple[int, int]:
     &#34;&#34;&#34;
     Transforms a &#39;Variable Integer&#39; back to its int representation.
     Returns the converted int and the number of bytes used by the VarInt
@@ -152,7 +159,7 @@ representation.</p></div>
     return (int.from_bytes(b[1:9], &#34;little&#34;), 9)</code></pre>
 </details>
 </dd>
-<dt id="ssb_util.is_file"><code class="name flex">
+<dt id="tinyssb.ssb_util.is_file"><code class="name flex">
 <span>def <span class="ident">is_file</span></span>(<span>file_name: str) ‑> bool</span>
 </code></dt>
 <dd>
@@ -183,23 +190,23 @@ Directory names may not end with '/'.</p></div>
         return file_name in os.listdir(dir_prefix)</code></pre>
 </details>
 </dd>
-<dt id="ssb_util.to_hex"><code class="name flex">
+<dt id="tinyssb.ssb_util.to_hex"><code class="name flex">
 <span>def <span class="ident">to_hex</span></span>(<span>b: bytes) ‑> str</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Returns the bytes as a hex string.</p></div>
+<div class="desc"><p>Returns the given bytes as a hex string.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def to_hex(b: bytes) -&gt; str:
     &#34;&#34;&#34;
-    Returns the bytes as a hex string.
+    Returns the given bytes as a hex string.
     &#34;&#34;&#34;
     return bin.hexlify(b).decode()</code></pre>
 </details>
 </dd>
-<dt id="ssb_util.to_var_int"><code class="name flex">
+<dt id="tinyssb.ssb_util.to_var_int"><code class="name flex">
 <span>def <span class="ident">to_var_int</span></span>(<span>i: int) ‑> bytes</span>
 </code></dt>
 <dd>
@@ -239,13 +246,18 @@ Used to indicate the length of a blob.</p></div>
 <ul></ul>
 </div>
 <ul id="index">
+<li><h3>Super-module</h3>
+<ul>
+<li><code><a title="tinyssb" href="index.html">tinyssb</a></code></li>
+</ul>
+</li>
 <li><h3><a href="#header-functions">Functions</a></h3>
 <ul class="">
-<li><code><a title="ssb_util.from_hex" href="#ssb_util.from_hex">from_hex</a></code></li>
-<li><code><a title="ssb_util.from_var_int" href="#ssb_util.from_var_int">from_var_int</a></code></li>
-<li><code><a title="ssb_util.is_file" href="#ssb_util.is_file">is_file</a></code></li>
-<li><code><a title="ssb_util.to_hex" href="#ssb_util.to_hex">to_hex</a></code></li>
-<li><code><a title="ssb_util.to_var_int" href="#ssb_util.to_var_int">to_var_int</a></code></li>
+<li><code><a title="tinyssb.ssb_util.from_hex" href="#tinyssb.ssb_util.from_hex">from_hex</a></code></li>
+<li><code><a title="tinyssb.ssb_util.from_var_int" href="#tinyssb.ssb_util.from_var_int">from_var_int</a></code></li>
+<li><code><a title="tinyssb.ssb_util.is_file" href="#tinyssb.ssb_util.is_file">is_file</a></code></li>
+<li><code><a title="tinyssb.ssb_util.to_hex" href="#tinyssb.ssb_util.to_hex">to_hex</a></code></li>
+<li><code><a title="tinyssb.ssb_util.to_var_int" href="#tinyssb.ssb_util.to_var_int">to_var_int</a></code></li>
 </ul>
 </li>
 </ul>
