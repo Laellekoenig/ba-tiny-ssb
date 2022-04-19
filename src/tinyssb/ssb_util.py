@@ -1,7 +1,14 @@
 import os
-import binascii as bin
-# uncomment following line for micropython
-# import ubinascii as bin
+import sys
+
+
+if sys.implementation.name == "micropython":
+    # micropython
+    import ubinascii as bin
+else:
+    # regular python
+    import binascii as bin
+    from typing import Tuple
 
 
 def is_file(file_name: str) -> bool:
@@ -25,13 +32,13 @@ def is_file(file_name: str) -> bool:
 
 def to_hex(b: bytes) -> str:
     """
-    Returns the bytes as a hex string.
+    Returns the given bytes as a hex string.
     """
     return bin.hexlify(b).decode()
 
 
 def from_hex(s: str) -> bytes:
-    """Returns the hex string as bytes."""
+    """Returns the given hex string as bytes."""
     return bin.unhexlify(s.encode())
 
 
@@ -52,7 +59,7 @@ def to_var_int(i: int) -> bytes:
     return b"\xff" + i.to_bytes(8, "little")
 
 
-def from_var_int(b: bytes) -> (int, int):
+def from_var_int(b: bytes) -> Tuple[int, int]:
     """
     Transforms a 'Variable Integer' back to its int representation.
     Returns the converted int and the number of bytes used by the VarInt

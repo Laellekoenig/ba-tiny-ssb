@@ -3,17 +3,17 @@ import pure25519
 
 
 def sign_elliptic(key: bytes, payload: bytes) -> bytes:
-    """creates a 64B elliptic curve signature of the given payload
-    using the secret key
-    can be confirmed using the corresponding public key"""
+    """Creates a 64B elliptic curve signature of the given payload
+    using the provided secret key.
+    Can be verified using the corresponding public key."""
     assert len(key) == 32, "signing key must be 32B"
     skey = pure25519.SigningKey(key)
     return skey.sign(payload)
 
 
 def verify_elliptic(msg: bytes, signature: bytes, key: bytes) -> bool:
-    """attempts to verify the given message and signature
-    returns True if successful"""
+    """Attempts to verify the given message and signature.
+    Returns True if successful."""
     assert len(signature) == 64, "signature must be 64B"
     assert len(key) == 32, "key must be 32B"
     vkey = pure25519.VerifyingKey(key)
@@ -28,8 +28,10 @@ class Crypto:
     """
     Used for calculating HMAC signatures using sha256
     and a secret (symmetric) key.
+    Only holds one instance of a hash algorithm at any time in order to
+    work on Pycom devices.
+    Not used anymore (replaced by ed25519).
     """
-
     sha256 = None
 
     def __init__(self, key: bytes = b"bad key"):
@@ -72,7 +74,6 @@ class Crypto:
         Computes the HMAC signature of the given bytes.
         Length of the output is 32B.
         """
-
         # inner digest
         inner = self._ipad + msg
         self.sha256 = hashlib.sha256()
@@ -89,6 +90,9 @@ class Crypto:
         return hmac
 
     def hash(self, msg: bytes) -> bytes:
+        """
+        Hashes the given message using the sha256 algorithm.
+        """
         self.sha256 = hashlib.sha256()
         self.sha256.update(msg)
         h = self.sha256.digest()
@@ -96,5 +100,10 @@ class Crypto:
         return h
 
     def sign(self, payload: bytes) -> bytes:
+        """
+        Uses sha256 HMAC to generate a signature of the given payload.
+        Uses symmetric keys.
+        The resulting 32B signature is padded to 64B -> tinyssb.
+        """
         hmac = self.get_signature(payload)
         return hmac + bytes(32)

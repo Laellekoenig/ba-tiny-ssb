@@ -1,8 +1,15 @@
-# from crypto import Crypto
 import hashlib
-from crypto import sign_elliptic
-from crypto import verify_elliptic
-from ssb_util import to_var_int
+import sys
+from .crypto import sign_elliptic
+from .crypto import verify_elliptic
+from .ssb_util import to_var_int
+
+# non-micropython import
+if sys.implementation.name != "micropython":
+    # Optional type annotations are ignored in micropython
+    from typing import Optional
+    from typing import List
+    from typing import Tuple
 
 
 class PacketType:
@@ -10,21 +17,29 @@ class PacketType:
     Enum containing different packet types
     (as defined in tiny-ssb protocol).
     """
-
     plain48 = bytes([0x00])  # sha256 HMAC signature, signle packet with 48B
     chain20 = bytes([0x01])  # sha256 HMAC signature, start of hash sidechain
     ischild = bytes([0x02])  # metafeed information, only in genesis block
     iscontn = bytes([0x03])  # metafeed information, only in genesis block
     mkchild = bytes([0x04])  # metafeed information
     contdas = bytes([0x05])  # metafeed information
+    types = [plain48, chain20, ischild, iscontn, mkchild, contdas]
+
+    @classmethod
+    def is_type(cls, t: int) -> bool:
+        """
+        Returns True if there exists a packet type with the same
+        number as the given int.
+        """
+        return t in cls.types
 
 
 class Blob:
     """
     Simple class for handling blob information.
     Not used for first blob entry (Packet).
+    Uses sha256 for generating pointers to next blob.
     """
-
     def __init__(self, payload: bytes, ptr: bytes):
         self.payload = payload
         self.ptr = ptr
@@ -34,34 +49,36 @@ class Blob:
 
 class Packet:
     """
-    Contains all the information as defined in tiny-ssb protocol.
-    Contains bytes payload and feed information.
-    The hashing and signing algorithms can be changed through the
-    'hash_algo' and 'sign_algo' fields.
+    As defined in the tiny sbb protocol.
+    Contains physical and virtual information.
     The maximum payload size of a packet is 48B.
+    Uses ed25519 for signing and verifying Packets.
     """
-
     prefix = b"tiny-v01"  # length must be 8B
 
-    def __init__(self, fid: bytes, seq: bytes,
-                 prev_mid: bytes, payload: bytes = bytes(48),
-                 pkt_type: bytes = PacketType.plain48,
-                 skey: bytes = None):
+    def __init__(self,
+                 fid: bytes,
+                 seq: bytes,
+                 prev_mid: bytes,
+                 payload: bytes = bytes(48),
+                 pkt_type: bytes = PacketType.plain48,  # default
+                 skey: Optional[bytes] = None):
 
-        assert len(fid) == 32, "fid must be 32B"
+        # check arguments
+        assert len(fid) == 32, "feed ID must be 32B"
         assert len(seq) == 4, "sequence number must be 4B"
         assert len(prev_mid) == 20, "previous msg_id must be 20B"
-        if skey is not None:
-            assert len(skey) == 32, "signing key must be 32B"
+        assert (skey is None or
+                len(skey) == 32), "skey must be 32B or None"
+
         # make sure that payload is 48 bytes, rejected if too long
-        if payload is None:
-            payload = bytes(48)
         if len(payload) < 48:
             # too short -> append 0s
             missing = 48 - len(payload)
             payload += bytes(missing)
         assert len(payload) == 48, "payload must be 48B"
 
+        # build packet
         self.block_name = self.prefix + fid + seq + prev_mid
         self.fid = fid
         self.seq = seq
@@ -70,6 +87,8 @@ class Packet:
         self.pkt_type = pkt_type
         self.skey = skey
         self.dmx = self._calc_dmx()
+
+        # sign, if possible
         if self.skey is None:
             self.signature = None
             self.mid = None
@@ -80,14 +99,15 @@ class Packet:
             self.wire = self._get_wire()
 
     def __repr__(self):
-        s = "packet(\nfeed_id:{},\nseq:{},\n".format(self.fid,
-                                                     self.seq)
-        s += "prev_mid:{},\npayload:{},\ndmx:{}\n".format(self.prev_mid,
-                                                          self.payload,
-                                                          self.dmx)
-        s += "sig:{},\nmid:{},\nwire:{})".format(self.signature,
-                                                 self.mid,
-                                                 self.wire)
+        s = "Packet\n"
+        s += "------\n"
+        s += "fid:\t{}\n".format(self.fid)
+        s += "seq:\t{}\n".format(self.seq)
+        s += "prev_mid:\t{}\n".format(self.prev_mid)
+        s += "payload:\t{}\n".format(self.payload)
+        s += "type:\t{}\n".format(self.pkt_type)
+        s += "mid:\t{}\n".format(self.mid)
+        s += "signature:\t{}".format(self.signature)
         return s
 
     def _calc_dmx(self) -> bytes:
@@ -114,9 +134,7 @@ class Packet:
 
     def _calc_signature(self) -> bytes:
         """
-        Computes the signature of the packet.
-        For now, sha256 HMAC using symmetric key is used.
-        Can be swapped out through 'sign_algo' field.
+        Computes the signature of the packet using the ed25519 algorithm..
         """
         assert self.skey is not None, "key needed for signing"
         return sign_elliptic(self.skey, self._expand())
@@ -128,6 +146,7 @@ class Packet:
         the signature of the packet.
         """
         if self.signature is not None:
+            # signature already calculated
             return self._expand() + self.signature
         return self._expand() + self._calc_signature()
 
@@ -141,15 +160,16 @@ class Packet:
     def _get_wire(self) -> bytes:
         """
         Returns the 120B 'raw' wire format of the packet.
-        The missing 'virtual' information can be infereed by
+        The missing 'virtual' information can be inferred by
         the recipient using prior packets.
         """
         assert self.signature is not None, "sign packet first"
         return self.dmx + self.pkt_type + self.payload + self.signature
 
-    def sign(self, skey: bytes = bytes(0)) -> None:
+    def sign(self, skey: bytes = bytes(32)) -> None:
         """Calculates the signature of the Packet and all the related fields
-        using the provided signing key"""
+        using the given signing key.
+        For testing, the default key is 32 0s."""
         assert len(skey) == 32, "skey must be 32B"
         self.skey = skey
         self.signature = self._calc_signature()
@@ -157,30 +177,34 @@ class Packet:
         self.wire = self._get_wire()
 
 
-def pkt_from_bytes(fid: bytes, seq: bytes,
-                   prev_mid: bytes, raw_pkt: bytes) -> Packet:
+def pkt_from_bytes(fid: bytes,
+                   seq: bytes,
+                   prev_mid: bytes,
+                   pkt_wire: bytes) -> Optional[Packet]:
     """
     Creates a Packet instance from the given feed ID, sequence number
     previous message ID and wire bytes.
     Also validates the packet.
     If the signatures do not match, 'None' is returned.
     """
-    assert len(raw_pkt) == 120, "raw packet length must be 120B"
+    assert len(pkt_wire) == 120, "length of packet wire format must be 120B"
     assert len(fid) == 32, "feed id must be 32B"
-    # dmx = raw_pkt[:7]
-    pkt_type = raw_pkt[7:8]
-    payload = raw_pkt[8:56]
-    signature = raw_pkt[56:]
 
+    # dmx = raw_pkt[:7]
+    pkt_type = pkt_wire[7:8]
+    payload = pkt_wire[8:56]
+    signature = pkt_wire[56:]
+
+    # create unsigned Packet
     pkt = Packet(fid, seq, prev_mid, payload, pkt_type=pkt_type)
 
     # use fid as verification key
     if verify_elliptic(pkt._expand(), signature, fid):
-        pkt = Packet(fid, seq, prev_mid, payload, pkt_type=pkt_type)
+        # verification successful
         # fill-in signature and calculate missing info
         pkt.signature = signature
         pkt.mid = pkt._calc_mid()
-        pkt.wire = raw_pkt
+        pkt.wire = pkt_wire
         return pkt
     else:
         print("packet not trusted")
@@ -190,8 +214,8 @@ def pkt_from_bytes(fid: bytes, seq: bytes,
 def create_genesis_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
     """
     Creates and returns a 'self-signed' Packet instance
-    with sequence number of 1.
-    Also contains a payload of max 48B.
+    with sequence number 1.
+    Also contains a payload of max. 48B.
     Used when creating new feeds.
     """
     seq = (1).to_bytes(4, "big")  # seq numbers start at 1
@@ -199,43 +223,46 @@ def create_genesis_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
     return Packet(fid, seq, prev_mid, payload, skey=skey)
 
 
-def create_parent_pkt(fid: bytes, seq: bytes,
-                      prev_mid: bytes, child_fid: bytes,
+def create_parent_pkt(fid: bytes,
+                      seq: bytes,
+                      prev_mid: bytes,
+                      child_fid: bytes,
                       skey: bytes) -> Packet:
     """
-    Creates and returns a packet instance of type 'mkchild'.
+    Creates and returns a Packet instance of type 'mkchild'.
     Is used in parent feed, to refer to child feed.
     No payload can be attached to this packet,
     as it contains information about the child feed.
     """
-    # TODO: maybe add time stamp?
-    return Packet(fid, seq, prev_mid,
-                  payload=child_fid, pkt_type=PacketType.mkchild, skey=skey)
+    # TODO: add more info (time stamp?)
+    return Packet(fid, seq, prev_mid, payload=child_fid,
+                  pkt_type=PacketType.mkchild, skey=skey)
 
 
 def create_child_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
     """
     Creates and returns the first packet of a new child feed.
-    Starts with sequence number 1 and has
-    packet type 'ischild'.
+    Starts with sequence number 1 and has packet type 'ischild'.
     """
     seq = (1).to_bytes(4, "big")
     prev_mid = fid[:20]
-    return Packet(fid, seq, prev_mid,
-                  payload, pkt_type=PacketType.ischild, skey=skey)
+    return Packet(fid, seq, prev_mid, payload,
+                  pkt_type=PacketType.ischild, skey=skey)
 
 
-def create_end_pkt(fid: bytes, seq: bytes,
-                   prev_mid: bytes, contn_fid: bytes,
+def create_end_pkt(fid: bytes,
+                   seq: bytes,
+                   prev_mid: bytes,
+                   contn_fid: bytes,
                    skey: bytes) -> Packet:
     """
     Creates and returns the last packet of a feed.
     Contains information of the continuing feed.
     Has packet type 'contdas'.
     """
-    # TODO: maybe add time stamp?
-    return Packet(fid, seq, prev_mid,
-                  payload=contn_fid, pkt_type=PacketType.contdas, skey=skey)
+    # TODO: add more info (time stamp?)
+    return Packet(fid, seq, prev_mid, payload=contn_fid,
+                  pkt_type=PacketType.contdas, skey=skey)
 
 
 def create_contn_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
@@ -245,8 +272,8 @@ def create_contn_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
     """
     seq = (1).to_bytes(4, "big")
     prev_mid = fid[:20]
-    return Packet(fid, seq, prev_mid,
-                  payload, pkt_type=PacketType.iscontn, skey=skey)
+    return Packet(fid, seq, prev_mid, payload,
+                  pkt_type=PacketType.iscontn, skey=skey)
 
 
 def create_succ(prev: Packet, payload: bytes, skey: bytes) -> Packet:
@@ -261,9 +288,9 @@ def create_succ(prev: Packet, payload: bytes, skey: bytes) -> Packet:
 
 
 def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
-                 content: bytes, skey: bytes) -> tuple[Packet, list[Blob]]:
+                 content: bytes, skey: bytes) -> Tuple[Packet, List[Blob]]:
     """
-    Creates a blob chain, containing the given bytes (content).
+    Creates a blob chain, containing the given bytes.
     The blob is returned as a tuple, containing the header of the blob
     as a packet and a list containing Blob instances.
     Blob instances can easily be saved as bytes by using blob.wire.
@@ -271,22 +298,22 @@ def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
     """
     chain = []
     # get size as VarInt and prepend to content
-    size = to_var_int(len(content))
-    content = size + content
+    content = to_var_int(len(content)) + content
 
     # check if content fits into single blob
     num_fill = 28 - len(content)  # how many bytes left to fill content
     if num_fill >= 0:
         # only one blob -> null pointer at end
-        payload = content + bytes(num_fill)
-        header = payload
+        header = content + bytes(num_fill)
         ptr = bytes(20)
+
     else:
-        # pad msg -> divisible by 100
+        # pad message -> divisible by 100
         header = content[:28]
         content = content[28:]
         pad = 100 - len(content) % 100
         content += bytes(pad)
+
         # start with last pkt
         ptr = bytes(20)
         while len(content) != 0:
@@ -300,16 +327,8 @@ def create_chain(fid: bytes, seq: bytes, prev_mid: bytes,
     # create first pkt
     payload = header + ptr
     assert len(payload) == 48, "blob header must be 48B"
-    pkt = Packet(fid, seq, prev_mid,
-                 payload, pkt_type=PacketType.chain20, skey=skey)
+    pkt = Packet(fid, seq, prev_mid, payload,
+                 pkt_type=PacketType.chain20, skey=skey)
 
     chain.reverse()
     return (pkt, chain)
-
-
-def dmx(name: bytes) -> bytes:
-    """
-    Calculates and returns the dmx value for the given name.
-    """
-    block_name = Packet.prefix + name
-    return hashlib.sha256(block_name).digest()[:7]
