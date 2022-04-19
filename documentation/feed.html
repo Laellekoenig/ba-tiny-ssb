@@ -126,13 +126,13 @@ class Feed:
 
         return pkt_wire
 
-    def get_type(self, seq: int) -&gt; Optional[int]:
+    def get_type(self, seq: int) -&gt; Optional[bytes]:
         &#34;&#34;&#34;
         Returns the type of the packet with given index.
         Bytes can be compared with PacketTypes.
         &#34;&#34;&#34;
         pkt_wire = self.get_wire(seq)
-        pkt_type = int.from_bytes(pkt_wire[7:8], &#34;big&#34;)
+        pkt_type = pkt_wire[7:8]
 
         if PacketType.is_type(pkt_type):
             return pkt_type
@@ -567,13 +567,13 @@ Used to get/append data from/to feeds.</p></div>
 
         return pkt_wire
 
-    def get_type(self, seq: int) -&gt; Optional[int]:
+    def get_type(self, seq: int) -&gt; Optional[bytes]:
         &#34;&#34;&#34;
         Returns the type of the packet with given index.
         Bytes can be compared with PacketTypes.
         &#34;&#34;&#34;
         pkt_wire = self.get_wire(seq)
-        pkt_type = int.from_bytes(pkt_wire[7:8], &#34;big&#34;)
+        pkt_type = pkt_wire[7:8]
 
         if PacketType.is_type(pkt_type):
             return pkt_type
@@ -1207,7 +1207,7 @@ If this feed does not have a predecessor, 'None' is returned.</p></div>
 </details>
 </dd>
 <dt id="tinyssb.feed.Feed.get_type"><code class="name flex">
-<span>def <span class="ident">get_type</span></span>(<span>self, seq: int) ‑> Optional[int]</span>
+<span>def <span class="ident">get_type</span></span>(<span>self, seq: int) ‑> Optional[bytes]</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Returns the type of the packet with given index.
@@ -1216,13 +1216,13 @@ Bytes can be compared with PacketTypes.</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def get_type(self, seq: int) -&gt; Optional[int]:
+<pre><code class="python">def get_type(self, seq: int) -&gt; Optional[bytes]:
     &#34;&#34;&#34;
     Returns the type of the packet with given index.
     Bytes can be compared with PacketTypes.
     &#34;&#34;&#34;
     pkt_wire = self.get_wire(seq)
-    pkt_type = int.from_bytes(pkt_wire[7:8], &#34;big&#34;)
+    pkt_type = pkt_wire[7:8]
 
     if PacketType.is_type(pkt_type):
         return pkt_type

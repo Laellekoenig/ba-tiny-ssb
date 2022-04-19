@@ -54,7 +54,7 @@ class PacketType:
     types = [plain48, chain20, ischild, iscontn, mkchild, contdas]
 
     @classmethod
-    def is_type(cls, t: int) -&gt; bool:
+    def is_type(cls, t: bytes) -&gt; bool:
         &#34;&#34;&#34;
         Returns True if there exists a packet type with the same
         number as the given int.
@@ -865,7 +865,7 @@ For testing, the default key is 32 0s.</p></div>
     types = [plain48, chain20, ischild, iscontn, mkchild, contdas]
 
     @classmethod
-    def is_type(cls, t: int) -&gt; bool:
+    def is_type(cls, t: bytes) -&gt; bool:
         &#34;&#34;&#34;
         Returns True if there exists a packet type with the same
         number as the given int.
@@ -906,7 +906,7 @@ For testing, the default key is 32 0s.</p></div>
 <h3>Static methods</h3>
 <dl>
 <dt id="tinyssb.packet.PacketType.is_type"><code class="name flex">
-<span>def <span class="ident">is_type</span></span>(<span>t: int) ‑> bool</span>
+<span>def <span class="ident">is_type</span></span>(<span>t: bytes) ‑> bool</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Returns True if there exists a packet type with the same
@@ -916,7 +916,7 @@ number as the given int.</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@classmethod
-def is_type(cls, t: int) -&gt; bool:
+def is_type(cls, t: bytes) -&gt; bool:
     &#34;&#34;&#34;
     Returns True if there exists a packet type with the same
     number as the given int.
