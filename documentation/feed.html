@@ -427,7 +427,7 @@ class Feed:
         &#34;&#34;&#34;
         assert self.front_mid is not None, &#34;no front message ID found&#34;
         next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
-        next = self.fid + next_seq + self.front_mid
+        next = Packet.prefix + self.fid + next_seq + self.front_mid
         return hashlib.sha256(next).digest()[:20]
 
     def waiting_for_blob(self) -&gt; Optional[bytes]:
@@ -868,7 +868,7 @@ Used to get/append data from/to feeds.</p></div>
         &#34;&#34;&#34;
         assert self.front_mid is not None, &#34;no front message ID found&#34;
         next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
-        next = self.fid + next_seq + self.front_mid
+        next = Packet.prefix + self.fid + next_seq + self.front_mid
         return hashlib.sha256(next).digest()[:20]
 
     def waiting_for_blob(self) -&gt; Optional[bytes]:
@@ -1152,7 +1152,7 @@ in a tuple.</p></div>
     &#34;&#34;&#34;
     assert self.front_mid is not None, &#34;no front message ID found&#34;
     next_seq = (self.front_seq + 1).to_bytes(4, &#34;big&#34;)
-    next = self.fid + next_seq + self.front_mid
+    next = Packet.prefix + self.fid + next_seq + self.front_mid
     return hashlib.sha256(next).digest()[:20]</code></pre>
 </details>
 </dd>

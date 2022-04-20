@@ -123,7 +123,7 @@ class Packet:
         assert self.mid is not None, "sign packet first"
 
         next_seq = int.from_bytes(self.seq, "big") + 1
-        next = self.fid + next_seq.to_bytes(4, "big") + self.mid
+        next = self.prefix + self.fid + next_seq.to_bytes(4, "big") + self.mid
         return hashlib.sha256(next).digest()[:20]
 
     def _expand(self) -> bytes:

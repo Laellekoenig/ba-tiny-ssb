@@ -399,7 +399,7 @@ class Feed:
         """
         assert self.front_mid is not None, "no front message ID found"
         next_seq = (self.front_seq + 1).to_bytes(4, "big")
-        next = self.fid + next_seq + self.front_mid
+        next = Packet.prefix + self.fid + next_seq + self.front_mid
         return hashlib.sha256(next).digest()[:20]
 
     def waiting_for_blob(self) -> Optional[bytes]:
