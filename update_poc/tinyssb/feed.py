@@ -415,7 +415,10 @@ class Feed:
             return None
 
         # front packet is blob, check if complete
-        ptr = self[-1][-20:]
+        ptr = self.get_wire(-1)[36:56]  # 8:56 -> payload, last 20 bytes ptr
+        if ptr == bytes(20):
+            # self-contained blob
+            return None
 
         while ptr != bytes(20):
             try:
@@ -432,13 +435,20 @@ class Feed:
         blob = Blob(blob_wire[:-20], blob_wire[-20:])
 
         # check if blob is missing
-        if self.waiting_for_blob != blob.signature:
+        if self.waiting_for_blob() != blob.signature:
             return False
 
         # append
         return self._write_blob([blob])
 
     def get_want(self) -> bytes:
-        next_seq = (self.front_seq + 1).to_bytes(4, "big")
         want_dmx = hashlib.sha256(self.fid + b"want").digest()[:7]
-        return want_dmx + self.fid + next_seq
+        # test: blob dmx
+        blob_ptr = self.waiting_for_blob()
+
+        if blob_ptr is None:
+            next_seq = (self.front_seq + 1).to_bytes(4, "big")
+            return want_dmx + self.fid + next_seq
+        else:
+            next_seq = self.front_seq.to_bytes(4, "big")
+            return want_dmx + self.fid + next_seq + blob_ptr

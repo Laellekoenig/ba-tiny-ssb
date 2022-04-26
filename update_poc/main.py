@@ -4,6 +4,8 @@ import shutil
 from poc.node import Node
 import pure25519
 from typing import Tuple
+import json
+from tinyssb.ssb_util import to_hex
 
 
 def get_keypair() -> Tuple[bytes, bytes]:
@@ -19,37 +21,42 @@ def init() -> None:
     node_a = Node("a")
     node_b = Node("b")
     node_c = Node("c")
-    nodes = [master, node_a, node_b, node_c]
+    nodes = [node_a, node_b, node_c]
 
     # create code folders
-    for node in nodes:
-        if "code" not in os.listdir(node.path):
-            os.mkdir(node.path + "/code")
-
-            # now copy code files
-            code_path = "update_code"
-            for f in os.listdir(code_path):
-                shutil.copy(code_path + "/" + f, node.path + "/code")
+    for node in nodes + [master]:
+        # copy code files
+        code_path = "update_code"
+        for f in os.listdir(code_path):
+            shutil.copy(code_path + "/" + f, node.path + "/code")
 
     # create meta feed on master, add root to every other node -> subscribe
-    main_feed = master.create_feed()
-    assert main_feed is not None, "failed to create feed"
+    master_feed = master.create_feed()
+    assert master_feed is not None, "failed to create feed"
     meta_path = "data/master/_feeds"
     meta_path += "/" + os.listdir(meta_path)[0]
 
-    for node in nodes[1:]:
+    for node in nodes:
         shutil.copy(meta_path, node.path + "/_feeds")
 
-    # TODO: remove this testing part
-    # add first message for testing purposes to master feed
-    main_feed.append_blob(b"Hello World!")
-    # create child feed
-    child_feed = master.create_child_feed(main_feed)
-    assert child_feed is not None, "failed to create child feed"
-    child_feed.append_blob(b"Second feed.")
-    child_feed.append_blob(b"End second feed.")
 
-    main_feed.append_blob(b"End main feed.")
+    # set master fid for all nodes
+    for node in nodes + [master]:
+        node.set_master_fid(master_feed.fid)
+
+    # blob test
+    master_feed.append_bytes(b"first msg")
+    master_feed.append_blob(b"short blob")
+    master_feed.append_blob(b"long blob" + bytes(400) + b"end")
+    master_feed.append_bytes(b"end of test")
+
+    # node_feed = master.create_child_feed(master_feed)
+    # assert node_feed is not None, "failed to create node feed"
+    # rest is not necessary for this poc
+
+    # create update feed
+    # update_feed = master.create_child_feed(master_feed)
+    # assert update_feed is not None, "failed to create update feed"
 
     # ready
     return
