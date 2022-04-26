@@ -245,7 +245,7 @@ class Feed:
         """
         # get path of _blobs folder
         split = self.file_name.split("/")
-        path = "/".join(split[:-2]) + "_blobs/"
+        path = "/".join(split[:-2]) + "/_blobs/"
 
         # first two bytes of hash are the name of the subdirectory
         # ab23e5g... -> _blobs/ab/23e5g...
@@ -273,7 +273,7 @@ class Feed:
         split = self.file_name.split("/")
         # first two bytes of hash are the name of the subdirectory
         # ab23e5g... -> _blobs/ab/23e5g...
-        file_name = "/".join(split[:-2]) + "_blobs/" + hex_hash[:2]
+        file_name = "/".join(split[:-2]) + "/_blobs/" + hex_hash[:2]
         file_name += "/" + hex_hash[2:]
 
         try:
@@ -400,7 +400,7 @@ class Feed:
         assert self.front_mid is not None, "no front message ID found"
         next_seq = (self.front_seq + 1).to_bytes(4, "big")
         next = Packet.prefix + self.fid + next_seq + self.front_mid
-        return hashlib.sha256(next).digest()[:20]
+        return hashlib.sha256(next).digest()[:7]
 
     def waiting_for_blob(self) -> Optional[bytes]:
         """
@@ -415,7 +415,10 @@ class Feed:
             return None
 
         # front packet is blob, check if complete
-        ptr = self[-1][-20:]
+        ptr = self.get_wire(-1)[36:56]  # 8:56 -> payload, last 20 bytes ptr
+        if ptr == bytes(20):
+            # self-contained blob
+            return None
 
         while ptr != bytes(20):
             try:
@@ -432,8 +435,20 @@ class Feed:
         blob = Blob(blob_wire[:-20], blob_wire[-20:])
 
         # check if blob is missing
-        if self.waiting_for_blob != blob.signature:
+        if self.waiting_for_blob() != blob.signature:
             return False
 
         # append
         return self._write_blob([blob])
+
+    def get_want(self) -> bytes:
+        want_dmx = hashlib.sha256(self.fid + b"want").digest()[:7]
+        # test: blob dmx
+        blob_ptr = self.waiting_for_blob()
+
+        if blob_ptr is None:
+            next_seq = (self.front_seq + 1).to_bytes(4, "big")
+            return want_dmx + self.fid + next_seq
+        else:
+            next_seq = self.front_seq.to_bytes(4, "big")
+            return want_dmx + self.fid + next_seq + blob_ptr
