@@ -44,19 +44,13 @@ def init() -> None:
     for node in nodes + [master]:
         node.set_master_fid(master_feed.fid)
 
-    # blob test
-    master_feed.append_bytes(b"first msg")
-    master_feed.append_blob(b"short blob")
-    master_feed.append_blob(b"long blob" + bytes(400) + b"end")
-    master_feed.append_bytes(b"end of test")
-
-    # node_feed = master.create_child_feed(master_feed)
-    # assert node_feed is not None, "failed to create node feed"
-    # rest is not necessary for this poc
+    node_feed = master.create_child_feed(master_feed)
+    assert node_feed is not None, "failed to create node feed"
+    # inserting node feeds not necessary for this poc
 
     # create update feed
-    # update_feed = master.create_child_feed(master_feed)
-    # assert update_feed is not None, "failed to create update feed"
+    update_feed = master.create_child_feed(master_feed)
+    assert update_feed is not None, "failed to create update feed"
 
     # ready
     return
