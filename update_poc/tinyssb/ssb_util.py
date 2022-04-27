@@ -1,5 +1,6 @@
 import os
 import sys
+import pure25519
 
 
 if sys.implementation.name == "micropython":
@@ -77,3 +78,15 @@ def from_var_int(b: bytes) -> Tuple[int, int]:
         return (int.from_bytes(b[1:5], "little"), 5)
     assert len(b) >= 9
     return (int.from_bytes(b[1:9], "little"), 9)
+
+
+def create_keypair() -> Tuple[bytes, bytes]:
+    """
+    Creates a key pair for signing with elliptic curve.
+    Both keys are 32B and are returned as a tuple
+    (signing key first, verification key second).
+    """
+    key, _ = pure25519.create_keypair()
+    skey = key.sk_s[:32]
+    vkey = key.vk_s
+    return (skey, vkey)
