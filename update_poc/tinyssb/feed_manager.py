@@ -1,6 +1,7 @@
 import os
 import sys
-from threading import Lock
+# from threading import Lock
+import _thread
 from hashlib import sha256
 from .feed import Feed
 from .packet import create_child_pkt
@@ -35,7 +36,7 @@ class FeedManager:
         self.feeds = self._get_feeds()
 
         # dmx table
-        self.dmx_lock = Lock()
+        self.dmx_lock = _thread.allocate_lock()
         self.dmx_table = {}
         self._fill_dmx()
 
