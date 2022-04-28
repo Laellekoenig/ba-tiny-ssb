@@ -1,69 +1,77 @@
 import os
 import json
 from tinyssb.feed import Feed
-from tinyssb.ssb_util import to_hex
+from tinyssb.ssb_util import to_hex, create_keypair, from_hex
 from tinyssb.feed_manager import FeedManager
 
 class VersionManager:
 
-    path = None
-    cfg_file_name = None
-    feed_manager = None
-    update_feed = None
-    may_update = False
-    vc_dict = {}
+    def __init__(self, path: str, feed_manager: FeedManager) -> None:
+        self.path = path
+        self.cfg_file_name = path + "/config.json"
+        self.feed_manager = feed_manager
+        self.vc_dict = {}
+        self._load_config()
+        # TODO
+        self.update_feed = None
+        self.may_update = False
 
-    @classmethod
-    def init(cls, path: str, feed_manager = FeedManager) -> None:
-        cls.path = path
-        cls.cfg_file_name = cls.path + "/config.json"
-        cls.feed_manager = feed_manager
-        # load config
-        cls._load_config()
+    def __del__(self) -> None:
+        self._save_config()
 
-    @classmethod
-    def _load_config(cls) -> None:
-        assert cls.path is not None, "call class first"
-        file_name = cls.path + "/config.json"
+    def is_configured(self) -> bool:
+        return self.update_feed is not None
 
-        if file_name not in os.listdir(cls.path):
+    def _load_config(self) -> None:
+        if self.cfg_file_name not in os.listdir(self.path):
             # no config found -> empty dict
-            cls.vc_dict = {}
+            self.vc_dict = {}
         else:
-            f = open(file_name, "r")
+            # file exists
+            f = open(self.cfg_file_name, "r")
             json_str = f.read()
             f.close()
             # load and set dict
-            cls.vc_dict = json.loads(json_str)
+            str_dict = json.loads(json_str)
+            self.vc_dict = {k: (from_hex(v[0]), from_hex(v[1]))
+                            for k, v in str_dict.items()}
 
-    @classmethod
-    def _save_config(cls) -> None:
-        assert cls.cfg_file_name is not None, "call class first"
-
+    def _save_config(self) -> None:
         # save version control dict
-        json_str = json.dumps(cls.vc_dict)
-        f = open(cls.cfg_file_name, "w")
+        str_dict = {k: (to_hex(v[0]), to_hex(v[1]))
+                    for k, v in self.vc_dict.items()}
+        json_str = json.dumps(str_dict)
+        f = open(self.cfg_file_name, "w")
         f.write(json_str)
         f.close()
 
-    @classmethod
-    def set_update_feed(cls, update_feed: Feed) -> None:
-        assert cls.feed_manager is not None, "call class first"
-        print("setting update feed")
-        cls.update_feed = update_feed
+    def set_update_feed(self, update_feed: Feed) -> None:
+        self.update_feed = update_feed
 
         # check if the key is available -> allowed to write new updates
-        if to_hex(cls.update_feed.fid) not in cls.feed_manager.keys:
+        if to_hex(self.update_feed.fid) not in self.feed_manager.keys:
             # not allowed to append
-            cls.may_update = False
+            self.may_update = False
             return
 
-        cls.may_update = True
+        self.may_update = True
         # check files
-        files = os.listdir(cls.path)
+        files = os.listdir(self.path)
         for f in files:
-            if f not in cls.vc_dict and f != cls.cfg_file_name:
+            if (f not in self.vc_dict and
+                f != self.cfg_file_name.split("/")[-1]):
                 # create new update feed for file
-                print(f)
+                skey, vkey = create_keypair()
+                new = self.feed_manager.create_child_feed(self.update_feed,
+                                                          vkey, skey)
+                assert new is not None, "failed to create new file feed"
+                new.append_blob(f.encode())
+                skey, vkey = create_keypair()
+                # create emergency feed
+                emergency = self.feed_manager.create_child_feed(new,
+                                                                vkey, skey)
+                assert emergency is not None, "failed to create emergency feed"
+                emergency.append_blob(f"{f} - emergency".encode())
+                self.vc_dict[f] = (new.fid, emergency.fid)
 
-        cls._save_config()
+        self._save_config()

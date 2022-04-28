@@ -22,6 +22,7 @@ def init() -> None:
     sk, vk = get_keypair()
     master_feed = master.feed_manager.create_feed(vk, skey=sk)
     assert master_feed is not None, "failed to create feed"
+    master.set_master_fid(master_feed.fid)
     meta_path = "data/master/_feeds"
     meta_path += "/" + os.listdir(meta_path)[0]
 
@@ -55,10 +56,6 @@ def init() -> None:
 
     for path in paths:
         shutil.copy(meta_path, path + "/_feeds")
-
-    master_feed.append_bytes(b"hello bytes")
-    master_feed.append_blob(b"short blob")
-    master_feed.append_blob(b"long blob" + bytes(400) + b"blob end")
 
     # add things to master feed
     sk, vk = get_keypair()

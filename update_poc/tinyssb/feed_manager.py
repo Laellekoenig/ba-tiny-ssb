@@ -1,7 +1,6 @@
 import os
 import sys
 from threading import Lock
-from typing import Callable
 from hashlib import sha256
 from .feed import Feed
 from .packet import create_child_pkt
@@ -39,6 +38,16 @@ class FeedManager:
         self.dmx_lock = Lock()
         self.dmx_table = {}
         self._fill_dmx()
+
+    def update_keys(self, keys: Dict[str, str]) -> None:
+        self.keys = keys
+        bytes_keys = {from_hex(k): from_hex(v) for k, v in keys.items()}
+
+        for fid in bytes_keys:
+            feed = self.get_feed(fid)
+            if feed is None:
+                continue
+            feed.skey = bytes_keys[fid]
 
     def _fill_dmx(self) -> None:
         self.dmx_lock.acquire()
@@ -105,7 +114,10 @@ class FeedManager:
             # expecting packet
             self.dmx_table[next_dmx] = (self.handle_packet, feed.fid)
             # debugging
-            print(feed[-1])
+            front_type = feed.get_type(-1)
+            if (front_type is PacketType.plain48 or
+                front_type is PacketType.chain20):
+                print(feed[-1])
         else:
             # expecting blob
             self.dmx_table[blob_ptr] = (self.handle_blob, feed.fid)
@@ -155,19 +167,6 @@ class FeedManager:
         self.dmx_lock.acquire()
         self.dmx_table[next_ptr] = (self.handle_blob, feed.fid)
         self.dmx_lock.release()
-
-    def get_update_feed(self, master_fid: bytes) -> Optional[Feed]:
-        master_feed = self.get_feed(master_fid)
-        assert master_feed is not None, "failed to get Feed"
-
-        children = master_feed.get_children()
-        if len(children) >= 2:
-            # second child is update feed
-            update_fid = children[1]
-            update_feed = self.get_feed(update_fid)
-            assert update_feed is not None, "failed to get feed"
-            return update_feed
-        return None
 
     def consult_dmx(self, msg: bytes) -> Optional[Tuple[Callable[[bytes, bytes],
                                                                  None],
