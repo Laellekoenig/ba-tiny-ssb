@@ -1,9 +1,7 @@
 import os
 import json
-import pure25519
-from typing import Callable
 from tinyssb.feed import Feed
-from tinyssb.ssb_util import to_hex, create_keypair
+from tinyssb.ssb_util import to_hex
 from tinyssb.feed_manager import FeedManager
 
 class VersionManager:
@@ -65,7 +63,7 @@ class VersionManager:
         files = os.listdir(cls.path)
         for f in files:
             if f not in cls.vc_dict and f != cls.cfg_file_name:
-                # TODO: create new update feed for file
+                # create new update feed for file
                 print(f)
 
         cls._save_config()

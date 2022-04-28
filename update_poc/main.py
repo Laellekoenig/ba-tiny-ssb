@@ -15,12 +15,12 @@ def get_keypair() -> Tuple[bytes, bytes]:
 
 def init() -> None:
     # master
-    master = Node
-    master.init("master")
+    master = Node("master")
     master_path = master.path
 
     # create meta feed on master, add root to every other node -> subscribe
-    master_feed = master.create_feed()
+    sk, vk = get_keypair()
+    master_feed = master.feed_manager.create_feed(vk, skey=sk)
     assert master_feed is not None, "failed to create feed"
     meta_path = "data/master/_feeds"
     meta_path += "/" + os.listdir(meta_path)[0]
@@ -29,22 +29,19 @@ def init() -> None:
     paths = []
 
     # node a
-    a = Node
-    a.init("a")
+    a = Node("a")
     a.set_master_fid(master_feed.fid)
     paths.append(a.path)
     del a
 
     # node b
-    b = Node
-    b.init("b")
+    b = Node("b")
     b.set_master_fid(master_feed.fid)
     paths.append(b.path)
     del b
 
     # node c
-    c = Node
-    c.init("c")
+    c = Node("c")
     c.set_master_fid(master_feed.fid)
     paths.append(c.path)
     del c
@@ -59,30 +56,31 @@ def init() -> None:
     for path in paths:
         shutil.copy(meta_path, path + "/_feeds")
 
-    # add things to master feed
-    master = Node
-    master.init("master")
+    master_feed.append_bytes(b"hello bytes")
+    master_feed.append_blob(b"short blob")
+    master_feed.append_blob(b"long blob" + bytes(400) + b"blob end")
 
-    node_feed = master.create_child_feed(master_feed)
+    # add things to master feed
+    sk, vk = get_keypair()
+    node_feed = master.feed_manager.create_child_feed(master_feed, vk, sk)
     assert node_feed is not None, "failed to create node feed"
     # inserting node feeds not necessary for this poc
 
     # create update feed
-    update_feed = master.create_child_feed(master_feed)
+    sk, vk = get_keypair()
+    update_feed = master.feed_manager.create_child_feed(master_feed, vk, sk)
     assert update_feed is not None, "failed to create update feed"
     # ready
     return
 
 
 def master() -> None:
-    master = Node
-    master.init("master")
+    master = Node("master")
     master.io()
 
 
 def node(name: str) -> None:
-    node = Node
-    node.init(name)
+    node = Node(name)
     node.io()
 
 

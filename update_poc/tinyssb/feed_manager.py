@@ -1,5 +1,8 @@
 import os
 import sys
+from threading import Lock
+from typing import Callable
+from hashlib import sha256
 from .feed import Feed
 from .packet import create_child_pkt
 from .packet import create_contn_pkt
@@ -8,13 +11,12 @@ from .packet import create_parent_pkt
 from .ssb_util import from_hex
 from .ssb_util import is_file
 from .ssb_util import to_hex
+from .packet import PacketType
 
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
-    from typing import Optional
-    from typing import Union
-    from typing import Dict
+    from typing import Optional, Union, Dict, Callable, Tuple
 
 
 class FeedManager:
@@ -32,6 +34,153 @@ class FeedManager:
         self.blob_dir = self.path + "/" + "_blobs"
         self._check_dirs()
         self.feeds = self._get_feeds()
+
+        # dmx table
+        self.dmx_lock = Lock()
+        self.dmx_table = {}
+        self._fill_dmx()
+
+    def _fill_dmx(self) -> None:
+        self.dmx_lock.acquire()
+        for feed in self:
+            # check if next expected pkt is blob
+            want = feed.get_want()[:7]  # for incoming want requests
+            self.dmx_table[want] = (self.handle_want, feed.fid)
+
+            blob_ptr = feed.waiting_for_blob()
+            if blob_ptr is None:
+                next_dmx = feed.get_next_dmx()
+                self.dmx_table[next_dmx] = (self.handle_packet, feed.fid)
+            else:
+                self.dmx_table[blob_ptr] = (self.handle_blob, feed.fid)
+
+        self.dmx_lock.release()
+
+    def handle_want(self, fid: bytes, request: bytes) -> Optional[bytes]:
+        seq = int.from_bytes(request[39:43], "big")
+        requested_feed = self.get_feed(fid)
+        assert requested_feed is not None, "failed to get feed"
+        if requested_feed.front_seq < seq:
+            # packet does not exist yet
+            return None
+
+        requested_wire = None
+        if len(request) == 43:
+            print("want regular")
+            # regular feed entry request
+            requested_wire = requested_feed.get_wire(seq)
+            if requested_wire is None:
+                print("pkt does not exist yet")
+                return
+
+        if len(request) == 63:
+            print("want blob")
+            # blob request
+            blob_ptr = request[-20:]
+            requested_blob = requested_feed._get_blob(blob_ptr)
+            if requested_blob is None:
+                print("did not find blob")
+                # blob not found
+                return
+            requested_wire = requested_blob.wire
+
+        return requested_wire
+
+    def handle_packet(self, fid: bytes, wire: bytes) -> None:
+        feed = self.get_feed(fid)
+        assert feed is not None, "failed to get feed"
+        feed.verify_and_append_bytes(wire)
+
+        next_dmx = feed.get_next_dmx()
+        blob_ptr = feed.waiting_for_blob()
+
+        if next_dmx == wire[:7] and blob_ptr is None:
+            # nothing new was appended
+            return
+
+        # remove old dmx value and insert new value
+        self.dmx_lock.acquire()
+        self.dmx_table.pop(wire[:7], None)
+        if blob_ptr is None:
+            # expecting packet
+            self.dmx_table[next_dmx] = (self.handle_packet, feed.fid)
+            # debugging
+            print(feed[-1])
+        else:
+            # expecting blob
+            self.dmx_table[blob_ptr] = (self.handle_blob, feed.fid)
+            self.dmx_lock.release()
+            return
+        self.dmx_lock.release()
+
+
+        # check if new contn or child feed should be created
+        front_type = feed.get_type(-1)
+        new_fid = wire[8:40]
+
+        if (front_type == PacketType.mkchild or
+            front_type == PacketType.contdas):
+            print("creating new feed")
+            _ = self.create_feed(new_fid,
+                                 parent_fid=feed.fid,
+                                 parent_seq=feed.front_seq)
+
+    def handle_blob(self, fid: bytes, blob: bytes) -> None:
+        feed = self.get_feed(fid)
+        assert feed is not None, "failed to get feed"
+
+        # insert
+        if not feed.verify_and_append_blob(blob):
+            print("blob could not be verified")
+            return
+
+        signature = sha256(blob).digest()[:20]
+
+        # update table: remove old pointer
+        self.dmx_lock.acquire()
+        self.dmx_table.pop(signature, None)
+        self.dmx_lock.release()
+
+        # check if blob has ended
+        next_ptr = feed.waiting_for_blob()
+        if next_ptr is None:
+            print(feed[-1])
+            self.dmx_lock.acquire()
+            # add dmx for next packet
+            self.dmx_table[feed.get_next_dmx()] = (self.handle_packet, fid)
+            self.dmx_lock.release()
+            return
+
+        # add next pointer to table
+        self.dmx_lock.acquire()
+        self.dmx_table[next_ptr] = (self.handle_blob, feed.fid)
+        self.dmx_lock.release()
+
+    def get_update_feed(self, master_fid: bytes) -> Optional[Feed]:
+        master_feed = self.get_feed(master_fid)
+        assert master_feed is not None, "failed to get Feed"
+
+        children = master_feed.get_children()
+        if len(children) >= 2:
+            # second child is update feed
+            update_fid = children[1]
+            update_feed = self.get_feed(update_fid)
+            assert update_feed is not None, "failed to get feed"
+            return update_feed
+        return None
+
+    def consult_dmx(self, msg: bytes) -> Optional[Tuple[Callable[[bytes, bytes],
+                                                                 None],
+                                                        bytes]]:
+        self.dmx_lock.acquire()
+        try:
+            fn, fid = self.dmx_table[msg]
+        except Exception:
+            #no entry found
+            self.dmx_lock.release()
+            return None
+        self.dmx_lock.release()
+        return (fn, fid)
 
     def __len__(self):
         return len(self.feeds)
@@ -162,6 +311,16 @@ class FeedManager:
         if type(skey) is bytes:
             # add skey to dict if given
             self.keys[to_hex(fid)] = to_hex(skey)
+
+        # add to dmx table
+        want = feed.get_want()[:7]
+        next_dmx = feed.get_next_dmx()
+        self.dmx_lock.acquire()
+        self.dmx_table[want] = (self.handle_want, feed.fid)
+        self.dmx_table[next_dmx] = (self.handle_packet, feed.fid)
+        self.dmx_lock.release()
+
+        # add to dmx
         return feed
 
     def create_child_feed(self,
