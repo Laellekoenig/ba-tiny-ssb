@@ -1,7 +1,7 @@
 import hashlib
 import os
 import sys
-from .packet import Blob
+from .packet import Blob, create_upd_pkt
 from .packet import Packet
 from .packet import PacketType
 from .packet import create_chain
@@ -14,9 +14,7 @@ from .ssb_util import to_hex
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
-    from typing import Optional
-    from typing import List
-    from typing import Tuple
+    from typing import Optional, List, Tuple, Union
 
 class Feed:
     """
@@ -176,6 +174,7 @@ class Feed:
         self.front_seq += 1
         self.front_mid = pkt.mid
         self._update_header()
+
         return True
 
     def append_bytes(self, payload: bytes) -> bool:
@@ -261,6 +260,7 @@ class Feed:
                 f.close()
             except Exception:
                 return False
+
         return True
 
     def _get_blob(self, ptr: bytes) -> Optional[Blob]:
@@ -452,3 +452,19 @@ class Feed:
         else:
             next_seq = self.front_seq.to_bytes(4, "big")
             return want_dmx + self.fid + next_seq + blob_ptr
+
+    def add_upd_file_name(self, file_name: Union[str, bytes]) -> None:
+        assert self.skey is not None, "need signing key to append pkt"
+        assert self.front_mid is not None, "no front mid found"
+        pkt = create_upd_pkt(self.fid, self.front_seq + 1, self.front_mid,
+                             file_name, self.skey)
+
+        self.append_pkt(pkt)
+
+    def get_upd_file_name(self) -> Optional[str]:
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            if self.get_type(i) == PacketType.updfile:
+                file_name = self[i]
+                length, num_bytes = from_var_int(file_name)
+                return file_name[num_bytes:length + 1].decode()
+        return None

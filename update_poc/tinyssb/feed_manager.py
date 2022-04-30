@@ -40,6 +40,20 @@ class FeedManager:
         self.dmx_table = {}
         self._fill_dmx()
 
+        # callback functions
+        self._callback = {}
+
+    def register_callback(self, fid: Union[bytes, Feed], function) -> None:
+        if type(fid) is Feed:
+            fid = fid.fid
+        assert type(fid) is bytes, "failed to get fid from feed"
+
+        if fid not in self._callback:
+            self._callback[fid] = [function]
+        else:
+            lst = self._callback[fid]
+            self._callback[fid] = lst + [function]
+
     def update_keys(self, keys: Dict[str, str]) -> None:
         self.keys = keys
         bytes_keys = {from_hex(k): from_hex(v) for k, v in keys.items()}
@@ -99,7 +113,9 @@ class FeedManager:
     def handle_packet(self, fid: bytes, wire: bytes) -> None:
         feed = self.get_feed(fid)
         assert feed is not None, "failed to get feed"
-        feed.verify_and_append_bytes(wire)
+        if not feed.verify_and_append_bytes(wire):
+            # packet is not trusted
+            return
 
         next_dmx = feed.get_next_dmx()
         blob_ptr = feed.waiting_for_blob()
@@ -119,6 +135,8 @@ class FeedManager:
             if (front_type is PacketType.plain48 or
                 front_type is PacketType.chain20):
                 print(feed[-1])
+            if (front_type is PacketType.updfile):
+                print("new update feed: {}".format(feed.get_upd_file_name()))
         else:
             # expecting blob
             self.dmx_table[blob_ptr] = (self.handle_blob, feed.fid)
@@ -137,6 +155,12 @@ class FeedManager:
             _ = self.create_feed(new_fid,
                                  parent_fid=feed.fid,
                                  parent_seq=feed.front_seq)
+
+        # execute callbacks
+        if fid in self._callback:
+            functions = self._callback[fid]
+            for function in functions:
+                function(fid)
 
     def handle_blob(self, fid: bytes, blob: bytes) -> None:
         feed = self.get_feed(fid)
@@ -162,6 +186,12 @@ class FeedManager:
             # add dmx for next packet
             self.dmx_table[feed.get_next_dmx()] = (self.handle_packet, fid)
             self.dmx_lock.release()
+
+            # execute callbacks
+            if fid in self._callback:
+                functions = self._callback[fid]
+                for function in functions:
+                    function(fid)
             return
 
         # add next pointer to table

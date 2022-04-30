@@ -67,6 +67,30 @@ def init() -> None:
     sk, vk = get_keypair()
     update_feed = master.feed_manager.create_child_feed(master_feed, vk, sk)
     assert update_feed is not None, "failed to create update feed"
+
+    # create version control feed
+    sk, vk = get_keypair()
+    vc_feed = master.feed_manager.create_child_feed(update_feed, vk, sk)
+    assert vc_feed is not None, "failed to create vc feed"
+
+    update = """import os
+
+def example() -> None:
+    print("Hello World!")
+
+
+def main() -> int:
+    print("testing update")
+    example()
+    return 1
+
+if __name__ == "__main__":
+    main()
+    """
+    # test update
+    master.version_manager.set_update_feed(update_feed)
+    master.version_manager.update_file("example1.py", update)
+
     # ready
     return
 

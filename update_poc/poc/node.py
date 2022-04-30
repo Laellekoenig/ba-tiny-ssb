@@ -1,15 +1,19 @@
 import os
-import threading
+import sys
 import time
 import socket
 import struct
 import json
 from hashlib import sha256
-from threading import Thread
-from typing import Union
+import _thread
 from tinyssb.feed_manager import FeedManager
 from tinyssb.ssb_util import to_hex, from_hex
 from .version_manager import VersionManager
+
+# non-micropython import
+if sys.implementation.name != "micropython":
+    # Optional type annotations are ignored in micropython
+    from typing import Union
 
 
 class Node:
@@ -32,7 +36,7 @@ class Node:
 
         # threading
         self.queue = []
-        self.queue_lock = threading.Lock()
+        self.queue_lock = _thread.allocate_lock()
 
     def _create_dirs(self) -> None:
         if self.parent_dir not in os.listdir():
@@ -61,7 +65,6 @@ class Node:
 
         # configure and start version manager
         self.version_manager.set_update_feed(update_feed)
-        # TODO start
         return True
 
     def load_config(self) -> None:
@@ -126,7 +129,7 @@ class Node:
                 # add reserved 8B
                 msg = bytes(8) + msg
                 sock.sendto(msg, self.multicast_group)
-            time.sleep(1)
+            time.sleep(.2)
 
     def _listen(self, sock: socket.socket, own: int) -> None:
         # listen for incoming messages
@@ -178,7 +181,7 @@ class Node:
                 if want not in self.queue:
                     self.queue.append(want)
             self.queue_lock.release()
-            time.sleep(10)
+            time.sleep(1.5)
 
     def io(self) -> None:
         # create sockets
@@ -197,12 +200,9 @@ class Node:
                            socket.INADDR_ANY)
         r_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
-        t = Thread(target=self._listen, args=(r_sock, port,))
-        t.start()
+        _thread.start_new_thread(self._listen, (r_sock, port, ))
 
-        t2 = Thread(target=self._send, args=(s_sock,))
-        t2.start()
+        _thread.start_new_thread(self._send, (s_sock,))
 
-        # not ideal solution, but should suffice for poc
-        t3 = Thread(target=self._want_feeds)
-        t3.start()
+        # keep main thread alive
+        self._want_feeds()

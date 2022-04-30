@@ -4,12 +4,11 @@ from .crypto import sign_elliptic
 from .crypto import verify_elliptic
 from .ssb_util import to_var_int
 
+
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
-    from typing import Optional
-    from typing import List
-    from typing import Tuple
+    from typing import Optional, List, Tuple, Union
 
 
 class PacketType:
@@ -24,7 +23,9 @@ class PacketType:
     mkchild = bytes([0x04])  # metafeed information
     contdas = bytes([0x05])  # metafeed information
     acknldg = bytes([0x06])  # proof of having some fid:seq:sig entry
-    types = [plain48, chain20, ischild, iscontn, mkchild, contdas, acknldg]
+    updfile = bytes([0x07])  # packet containing file name for version control
+    types = [plain48, chain20, ischild, iscontn, mkchild, contdas, acknldg,
+             updfile]
 
     @classmethod
     def is_type(cls, t: bytes) -> bool:
@@ -275,6 +276,23 @@ def create_contn_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
     prev_mid = fid[:20]
     return Packet(fid, seq, prev_mid, payload,
                   pkt_type=PacketType.iscontn, skey=skey)
+
+
+def create_upd_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
+                   file_name: Union[str, bytes], skey: bytes) -> Packet:
+    """
+    Creates and returns a packet, indicating the file name in an update feed.
+    """
+    assert len(file_name) < 48, "file name name must be 47B or less"
+    if type(file_name) is str:
+        file_name = file_name.encode()
+    assert type(file_name) is bytes, "string to bytes conversion failed"
+    if type(seq) is int:
+        seq = (2).to_bytes(4, "big")
+    assert type(seq) is bytes, "int to bytes conversion failed"
+
+    payload = to_var_int(len(file_name)) + file_name
+    return Packet(fid, seq, prev_mid, payload, PacketType.updfile, skey)
 
 
 def create_succ(prev: Packet, payload: bytes, skey: bytes) -> Packet:
