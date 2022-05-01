@@ -1,6 +1,6 @@
 import os
-import sys
 import pure25519
+import sys
 
 
 if sys.implementation.name == "micropython":

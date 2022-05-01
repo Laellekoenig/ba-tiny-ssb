@@ -4,7 +4,6 @@ from .crypto import sign_elliptic
 from .crypto import verify_elliptic
 from .ssb_util import to_var_int
 
-
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
@@ -281,12 +280,14 @@ def create_contn_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
 def create_upd_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
                    file_name: Union[str, bytes], skey: bytes) -> Packet:
     """
-    Creates and returns a packet, indicating the file name in an update feed.
+    Creates and returns a packet, indicating the corresponding file name
+    of a given file update feed.
     """
     assert len(file_name) < 48, "file name name must be 47B or less"
     if type(file_name) is str:
         file_name = file_name.encode()
     assert type(file_name) is bytes, "string to bytes conversion failed"
+
     if type(seq) is int:
         seq = (2).to_bytes(4, "big")
     assert type(seq) is bytes, "int to bytes conversion failed"

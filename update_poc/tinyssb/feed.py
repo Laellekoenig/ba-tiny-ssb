@@ -10,11 +10,11 @@ from .ssb_util import from_var_int
 from .ssb_util import is_file
 from .ssb_util import to_hex
 
-
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
     from typing import Optional, List, Tuple, Union
+
 
 class Feed:
     """
@@ -431,6 +431,11 @@ class Feed:
         return None
 
     def verify_and_append_blob(self, blob_wire: bytes) -> bool:
+        """
+        Checks whether the given blob is missing in this feed.
+        If the signature is correct, the blob is saved as a file and
+        True is returned.
+        """
         assert len(blob_wire) == 120, "blobs must be 120B"
         blob = Blob(blob_wire[:-20], blob_wire[-20:])
 
@@ -442,26 +447,40 @@ class Feed:
         return self._write_blob([blob])
 
     def get_want(self) -> bytes:
+        """
+        Returns the current want request as bytes. This can be sent to other
+        clients in order to receive the missing packet or blob.
+        """
         want_dmx = hashlib.sha256(self.fid + b"want").digest()[:7]
-        # test: blob dmx
         blob_ptr = self.waiting_for_blob()
 
         if blob_ptr is None:
+            # packet missing
             next_seq = (self.front_seq + 1).to_bytes(4, "big")
             return want_dmx + self.fid + next_seq
         else:
+            # blob missing
             next_seq = self.front_seq.to_bytes(4, "big")
             return want_dmx + self.fid + next_seq + blob_ptr
 
     def add_upd_file_name(self, file_name: Union[str, bytes]) -> None:
+        """
+        Adds the given file name to this feed in the form of an
+        updfile packet.
+        """
         assert self.skey is not None, "need signing key to append pkt"
         assert self.front_mid is not None, "no front mid found"
+
         pkt = create_upd_pkt(self.fid, self.front_seq + 1, self.front_mid,
                              file_name, self.skey)
-
         self.append_pkt(pkt)
 
     def get_upd_file_name(self) -> Optional[str]:
+        """
+        Returns the file name that is stored in the first updfile packet
+        that is appended to this feed. If no file name is found, None is
+        returned.
+        """
         for i in range(self.anchor_seq + 1, self.front_seq + 1):
             if self.get_type(i) == PacketType.updfile:
                 file_name = self[i]

@@ -1,12 +1,15 @@
-import sys
 import os
-import shutil
-from poc.node import Node
 import pure25519
+import shutil
+import sys
+from poc.node import Node
 from typing import Tuple
 
 
 def get_keypair() -> Tuple[bytes, bytes]:
+    """
+    Creates an elliptic curve key pair and returns it as a tuple.
+    """
     keys, _ = pure25519.create_keypair()
     skey = keys.sk_s[:32]
     vkey = keys.vk_s
@@ -14,6 +17,9 @@ def get_keypair() -> Tuple[bytes, bytes]:
 
 
 def init() -> None:
+    """
+    Initializes all of the directories and files for the proof-of-concept.
+    """
     # master
     master = Node("master")
     master_path = master.path
@@ -23,6 +29,7 @@ def init() -> None:
     master_feed = master.feed_manager.create_feed(vk, skey=sk)
     assert master_feed is not None, "failed to create feed"
     master.set_master_fid(master_feed.fid)
+
     meta_path = "data/master/_feeds"
     meta_path += "/" + os.listdir(meta_path)[0]
 
@@ -110,6 +117,13 @@ def clean() -> None:
 
 
 if __name__ == "__main__":
+    """
+    Proof-of-concept can be started with different arguments:
+    i/init -> creates all of the needed directories and files
+    c/clear -> deletes all of the created directories and files
+    m/master -> starts the master node (may append updates)
+    n/node name -> starts a node with the given name (a, b or c)
+    """
     if len(sys.argv) == 3 and ("node" in sys.argv or "n" in sys.argv):
         name = sys.argv[-1]
         node(name)
