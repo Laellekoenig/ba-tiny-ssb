@@ -48,9 +48,10 @@ class VersionManager:
         of the corresponding file update FID and emergency FID is is the
         associated value.
         """
-        if self.path + "/" + self.cfg_file_name not in os.listdir(self.path):
+        if self.cfg_file_name not in os.listdir(self.path):
             # no config found -> empty dict
             self.vc_dict = {}
+            print("not found")
         else:
             # file exists
             json_str = read_file(self.path, self.cfg_file_name)
