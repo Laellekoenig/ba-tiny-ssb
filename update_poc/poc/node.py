@@ -227,6 +227,14 @@ class Node:
 
             time.sleep(1.5)
 
+    def user_input(self):
+        while True:
+            inpt = input()
+
+            # handle different commands
+            if inpt in ["p", "print"]:
+                print(self.feed_manager)
+
     def io(self) -> None:
         """
         Starts one listening and one sending thread.
@@ -248,6 +256,7 @@ class Node:
 
         _thread.start_new_thread(self._listen, (r_sock, port,))
         _thread.start_new_thread(self._send, (s_sock,))
+        _thread.start_new_thread(self.user_input, ())
 
         # keep main thread alive
         self._want_feeds()

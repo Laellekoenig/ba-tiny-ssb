@@ -1,14 +1,14 @@
-import os
+import sys
+
 
 def example() -> None:
     print("Hello World!")
 
 
 def main() -> int:
-    print("testing update")
     example()
     return 1
 
+
 if __name__ == "__main__":
-    main()
-    
+    sys.exit(main())

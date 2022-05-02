@@ -99,6 +99,7 @@ if __name__ == "__main__":
     master.version_manager.update_file("example1.py", update)
 
     # ready
+    print(master.feed_manager)
     return
 
 

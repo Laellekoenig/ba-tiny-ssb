@@ -1,6 +1,7 @@
 import _thread
 import os
 import sys
+from types import coroutine
 from .feed import Feed
 from .packet import (
     PacketType,
@@ -42,6 +43,51 @@ class FeedManager:
 
         # callback functions
         self._callback = {}
+
+    def __str__(self) -> str:
+        """
+        Used for visualizing all currently available feeds.
+        """
+        string_builder = []
+        for feed in self.feeds:
+            if feed.get_parent() is not None:
+                continue
+            string_builder.append(str(feed))
+
+            children = [(x, y, 0) for x, y in feed.get_children_index()]
+            while children != []:
+                child_tuple = children.pop(0)
+                child, index, offset = child_tuple
+                c_feed = self.get_feed(child)
+                assert c_feed is not None, "failed to get feed"
+                c_string = str(c_feed)
+
+                # now adjust left padding
+                padding_len = index - feed.anchor_seq + offset
+                padding = " " * 6 * padding_len
+                # add to c_string
+                c_string = "\n".join([padding + s for s in c_string.split("\n")])
+                string_builder.append(c_string)
+
+                # check for child in child
+                child_children = c_feed.get_children_index()
+                # add parent padding
+                child_children = [(x, y, padding_len) for (x, y) in child_children]
+                children = child_children + children
+
+            # create separator
+            max_len = -1
+            for string in string_builder:
+                for substring in string.split("\n"):
+                    if len(substring) > max_len:
+                        max_len = len(substring)
+
+            separator = "¨" * max_len
+            string_builder.insert(0, separator)
+            string_builder.append(separator)
+            string_builder.append("")
+
+        return "\n".join(string_builder)
 
     def __len__(self):
         return len(self.feeds)
