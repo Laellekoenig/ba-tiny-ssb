@@ -84,7 +84,6 @@ class FeedManager:
 
             separator = "¨" * max_len
             string_builder.insert(0, separator)
-            string_builder.append(separator)
             string_builder.append("")
 
         return "\n".join(string_builder)
@@ -129,6 +128,7 @@ class FeedManager:
 
         # remove
         functions.remove(function)
+        self._callback[fid] = functions
 
     def update_keys(self, keys: Dict[str, str]) -> None:
         """
@@ -492,9 +492,11 @@ class FeedManager:
             # debugging
             front_type = feed.get_type(-1)
             if front_type is PacketType.plain48 or front_type is PacketType.chain20:
-                print(feed[-1])
+                # print(feed[-1])
+                pass
             if front_type is PacketType.updfile:
-                print("new update feed: {}".format(feed.get_upd_file_name()))
+                # print("new update feed: {}".format(feed.get_upd_file_name()))
+                pass
         else:
             # expecting blob
             self.dmx_table[blob_ptr] = (self.handle_blob, feed.fid)
@@ -543,7 +545,7 @@ class FeedManager:
         # check if blob has ended
         next_ptr = feed.waiting_for_blob()
         if next_ptr is None:
-            print(feed[-1])
+            # print(feed[-1])
             self.dmx_lock.acquire()
             # add dmx for next packet
             self.dmx_table[feed.get_next_dmx()] = (self.handle_packet, fid)

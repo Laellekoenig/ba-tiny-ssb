@@ -1,7 +1,7 @@
 import hashlib
 import os
 import sys
-from .packet import Blob, create_upd_pkt
+from .packet import Blob, create_apply_pkt, create_upd_pkt, create_wait_for_pkt
 from .packet import Packet
 from .packet import PacketType
 from .packet import create_chain
@@ -64,6 +64,10 @@ class Feed:
                 feed += " CTD |"
             if pkt_type == PacketType.updfile:
                 feed += " UPD |"
+            if pkt_type == PacketType.applyup:
+                feed += " APP |"
+            if pkt_type == PacketType.waitfor:
+                feed += " WAF |"
 
         return "\n".join([title, numbers, seperator, feed, seperator])
 
@@ -135,6 +139,30 @@ class Feed:
         if PacketType.is_type(pkt_type):
             return pkt_type
         return None
+
+    def get_chain20(self, seq: int) -> Optional[bytes]:
+        """
+        Returns the ith chain20 packet of the feed.
+        Returns None if it does not exist.
+        """
+        update_count = 0
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            if self.get_type(i) == PacketType.chain20:
+                update_count += 1
+                if update_count == seq:
+                    return self[i]
+        return None
+
+    def count_chain20(self) -> int:
+        """
+        returns the count of appended chain20 packets.
+        """
+        update_count = 0
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            if self.get_type(i) == PacketType.chain20:
+                update_count += 1
+
+        return update_count
 
     def __iter__(self):
         self._n = self.anchor_seq
@@ -531,3 +559,50 @@ class Feed:
                 length, num_bytes = from_var_int(file_name)
                 return file_name[num_bytes:length + 1].decode()
         return None
+
+    def add_wait_for(self, wait_for_seq: Union[int, bytes]) -> None:
+        """
+        Adds the sequence number of the last relevant packet in the parent feed.
+        """
+        assert self.skey is not None, "need signing key to append packet"
+        assert self.front_mid is not None, "no front mid found"
+
+        pkt = create_wait_for_pkt(self.fid, self.front_seq + 1, self.front_mid,
+                                  wait_for_seq, self.skey)
+        self.append_pkt(pkt)
+
+    def add_apply(self, fid: bytes, seq: Union[bytes, int]) -> None:
+        """
+        Adds a command containing the fid and the sequence number of an update
+        that should be applied.
+        """
+        assert self.skey is not None, "need signing key to append packet"
+        assert self.front_mid is not None, "no front mid found"
+        # get relative sequence number
+        if seq != 0:
+            count = 0
+            for i in range(self.anchor_seq + 1, self.front_seq + 1):
+                if self.get_type(i) == PacketType.chain20:
+                    count += 1
+                    if count == seq:
+                        seq = i
+
+        pkt = create_apply_pkt(self.fid, self.front_seq + 1, self.front_mid,
+                               fid, seq, self.skey)
+        self.append_pkt(pkt)
+
+    def get_newest_apply(self, fid: bytes) -> int:
+        """
+        Searches for the newest apply packet for the given fid and returns
+        its sequence number.
+        If no apply is found, 0 is returned.
+        """
+
+        for i in range(self.front_seq, self.anchor_seq, -1):
+            # go backwards, first -> newest
+            if self.get_type(i) == PacketType.applyup:
+                content = self[i]
+                if content[:32] == fid:
+                    return int.from_bytes(content[32:36], "big")
+
+        return 0 

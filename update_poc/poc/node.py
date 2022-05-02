@@ -235,6 +235,25 @@ class Node:
             if inpt in ["p", "print"]:
                 print(self.feed_manager)
 
+            if inpt in ["e", "emergency"]:
+                file_name = "example1.py"
+                update = "print(\"hello emergency\")"
+                self.version_manager.emergency_update_file(file_name, update)
+
+            if inpt in ["c"]:
+                call = self.feed_manager._callback
+                new = {to_hex(k)[:8]: v for k, v in call.items()}
+                print(new)
+
+            if inpt in ["a", "apply"]:
+                file_name = input("file name: ")
+                seq = int(input("sequence number: "))
+                self.version_manager.add_apply(file_name, seq)
+
+            if inpt in ["sudo"]:
+                cmd = input("cmd: ")
+                exec(cmd)
+
     def io(self) -> None:
         """
         Starts one listening and one sending thread.

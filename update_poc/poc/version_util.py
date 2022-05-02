@@ -1,4 +1,3 @@
-from os import execl
 import sys
 from typing import Optional
 from tinyssb.ssb_util import to_var_int, from_var_int
@@ -9,14 +8,17 @@ if sys.implementation.name != "micropython":
     from typing import List, Tuple
 
 
-def get_file_changes(old_version: str, new_version: str) -> bytes:
+def get_changes(old_version: str, new_version: str) -> List[Tuple[int, str, str]]:
     """
     Takes two strings as input, the first being the old file and the second one
     being the updated version. Determines the insert and delete operations
-    required to get from old version to new version. These operations are
-    encoded as bytes so they can be appended to an update feed.
+    required to get from old version to new version.
+    These changes are returned as tuples consisting of:
+    - line number
+    - operation: D -> delete, I -> insert
+    - content of line
     """
-    changes = b""
+    changes = []
     old_lines = old_version.split("\n")
     new_lines = new_version.split("\n")
 
@@ -34,31 +36,39 @@ def get_file_changes(old_version: str, new_version: str) -> bytes:
         if old_l not in new_lines:
             # line was deleted
             # TODO: content of deleted line necessary? -> allow reverts?
-            change = to_var_int(line_num) + "D".encode() + old_l.encode()
-            changes += to_var_int(len(change)) + change
+            changes.append((line_num, "D", old_l))
             new_lines.insert(0, new_l)  # put new line back
             continue
 
         # old line occurs later in file -> insert new line
         old_lines.insert(0, old_l)  # return to list
 
-        change = to_var_int(line_num) + "I".encode() + new_l.encode()
-        changes += to_var_int(len(change)) + change
+        changes.append((line_num, "I", new_l))
         line_num += 1
 
     # old lines left -> must be deleted
     for line in old_lines:
-        change = to_var_int(line_num) + "D".encode() + line.encode()
-        changes += to_var_int(len(change)) + change
+        changes.append((line_num, "D", line))
 
     # new line left -> insert at end
     for line in new_lines:
-        change = to_var_int(line_num) + "I".encode() + line.encode()
-        changes += to_var_int(len(change)) + change
+        changes.append((line_num, "I", line))
         line_num += 1
 
     return changes
 
+
+def changes_to_bytes(changes: List[Tuple[int, str, str]]) -> bytes:
+    """
+    Encodes a given list of changes into a single bytes string.
+    """
+    b = b""
+    for change in changes:
+        i, op, ln = change  # unpack tuple
+        b_change = to_var_int(i) + op.encode() + ln.encode()
+        b += to_var_int(len(b_change)) + b_change
+
+    return b
 
 def bytes_to_changes(changes: bytes) -> List[Tuple[int, str, str]]:
     """
@@ -131,6 +141,9 @@ def write_file(path: str, file_name: str, content: str) -> bool:
     Returns True on success.
     """
     try:
+        msg = "writing file: {}".format(file_name)
+        separator = "\"" * len(msg)
+        print("\n".join([msg, separator]))
         f = open(path + "/" + file_name, "w")
         f.write(content)
         f.close()
@@ -138,3 +151,13 @@ def write_file(path: str, file_name: str, content: str) -> bool:
     except:
         print("failed to write to file {}".format(file_name))
         return False
+
+
+def reverse_changes(changes: List[Tuple[int, str, str]]) -> List[Tuple[int, str, str]]:
+    """
+    Reverses the effects of the given list of changes.
+    """
+
+    changes = [(a, "I", c) if b == "D" else (a, "D", c) for a, b, c in changes]
+    changes.reverse()
+    return changes

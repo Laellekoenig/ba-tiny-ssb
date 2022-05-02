@@ -1,3 +1,4 @@
+from ctypes import wstring_at
 import hashlib
 import sys
 from .crypto import sign_elliptic
@@ -23,8 +24,10 @@ class PacketType:
     contdas = bytes([0x05])  # metafeed information
     acknldg = bytes([0x06])  # proof of having some fid:seq:sig entry
     updfile = bytes([0x07])  # packet containing file name for version control
+    waitfor = bytes([0x08])  # sequence number of last relevant packet in parent
+    applyup = bytes([0x09])  # contains the fid and sequence number of update to apply
     types = [plain48, chain20, ischild, iscontn, mkchild, contdas, acknldg,
-             updfile]
+             updfile, waitfor, applyup]
 
     @classmethod
     def is_type(cls, t: bytes) -> bool:
@@ -293,7 +296,51 @@ def create_upd_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
     assert type(seq) is bytes, "int to bytes conversion failed"
 
     payload = to_var_int(len(file_name)) + file_name
-    return Packet(fid, seq, prev_mid, payload, PacketType.updfile, skey)
+    return Packet(fid, seq, prev_mid, payload,
+                  pkt_type=PacketType.updfile, skey=skey)
+
+
+def create_wait_for_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
+                        wait_for_seq: Union[int, bytes], skey: bytes) -> Packet:
+    """
+    Creates and returns a packet, containing the sequence number of the last
+    relevant packet in the parent feed.
+    """
+    # convert to bytes
+    if type(wait_for_seq) is str:
+        wait_for_seq = wait_for_seq.to_bytes(4, "big")
+    assert type(wait_for_seq) is bytes, "failed to convert seq to bytes"
+    payload = wait_for_seq
+
+    if type(seq) is int:
+        seq = seq.to_bytes(4, "big")
+    assert type(seq) is bytes, "failed to convert seq to bytes"
+
+    return Packet(fid, seq, prev_mid, payload,
+                  pkt_type=PacketType.waitfor, skey=skey)
+
+
+def create_apply_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
+                     file_fid: bytes, update_seq: Union[int, bytes],
+                     skey: bytes) -> Packet:
+    """
+    Creates and returns a packet, containing the fid and sequence number of an
+    update that should be applied.
+    """
+    # convert to bytes
+    if type(seq) is int:
+        seq = seq.to_bytes(4, "big")
+    assert type(seq) is bytes
+
+    if type(update_seq) is int:
+        update_seq = update_seq.to_bytes(4, "big")
+    assert type(update_seq) is bytes
+
+    # create payload
+    payload = file_fid + update_seq
+    
+    return Packet(fid, seq, prev_mid, payload,
+                  pkt_type=PacketType.applyup, skey=skey)
 
 
 def create_succ(prev: Packet, payload: bytes, skey: bytes) -> Packet:

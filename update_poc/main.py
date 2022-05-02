@@ -97,9 +97,9 @@ if __name__ == "__main__":
     # test update
     master.version_manager.set_update_feed(update_feed)
     master.version_manager.update_file("example1.py", update)
+    master.version_manager.update_file("example1.py", "test")
 
     # ready
-    print(master.feed_manager)
     return
 
 
@@ -137,3 +137,8 @@ if __name__ == "__main__":
 
         if "clean" in sys.argv or "c" in sys.argv:
             clean()
+
+        if "mm" in sys.argv:
+            clean()
+            init()
+            master()
