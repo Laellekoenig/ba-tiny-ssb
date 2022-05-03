@@ -6,6 +6,7 @@ from .version_util import (
     bytes_to_changes,
     changes_to_bytes,
     get_changes,
+    jump_versions,
     read_file,
     reverse_changes,
     write_file,
@@ -300,33 +301,14 @@ class VersionManager:
         file = read_file(self.path, file_name)
         assert file is not None, "failed to read file"
 
-        if seq < current_apply:
-            # go backwards
-            while seq != current_apply:
-                byte_changes = file_feed.get_chain20(current_apply)
-                changes = bytes_to_changes(byte_changes)
-                # backwards -> reverse changes
-                changes = reverse_changes(changes)
-                file = apply_changes(file, changes)
-                current_apply -= 1
-            
-            # save reverted file
-            write_file(self.path, file_name, file)
-            self._save_config()
-            return
-
-        # go forwards
-        while seq != current_apply:
-            current_apply += 1
-            byte_changes = file_feed.get_chain20(current_apply)
-            changes = bytes_to_changes(byte_changes)
-            file = apply_changes(file, changes)
+        changes = jump_versions(current_apply, seq, file_feed)
+        file = apply_changes(file, changes)
 
         # save updated file
         write_file(self.path, file_name, file)
         self._save_config()
 
-    def update_file(self, file_name: str, update: str) -> Optional[Tuple[bytes, int]]:
+    def update_file(self, file_name: str, update: str, depends_on: int) -> Optional[Tuple[bytes, int]]:
         """
         Computes the difference between a given file and update
         and appends the changes to the corresponding file update feed
@@ -351,23 +333,20 @@ class VersionManager:
         assert feed is not None, "failed to get feed"
 
         # get difference between old file and new file
-        old_file = read_file(self.path, file_name)
-        assert old_file is not None, "failed to read file"
+        current_file = read_file(self.path, file_name)
+        assert current_file is not None, "failed to read file"
 
         # check if there are updates that were not applied yet
         newest_apply = self.vc_feed.get_newest_apply(fid)
 
-        while newest_apply < feed.count_chain20():
-            # gaps -> apply missing updates first
-            newest_apply += 1
-            byte_changes = feed.get_chain20(newest_apply)
-            changes = bytes_to_changes(byte_changes)
-            old_file = apply_changes(old_file, changes)
+        changes = jump_versions(newest_apply, depends_on, feed) 
+        current_file = apply_changes(current_file, changes)
 
-        changes = get_changes(old_file, update)
+        # now calculate difference
+        update_changes = get_changes(current_file, update)
 
         # append to feed
-        feed.append_blob(changes_to_bytes(changes))
+        feed.append_blob(changes_to_bytes(update_changes, depends_on))
 
         # return update info
         seq = feed.front_seq
@@ -433,6 +412,10 @@ class VersionManager:
         # can't apply update that does not exist yet
         if feed.count_chain20() < seq:
             print("update does not exist yet")
+            return
+
+        if seq < 0:
+            print("no negative versions")
             return
 
         self._apply_update(fid, seq)

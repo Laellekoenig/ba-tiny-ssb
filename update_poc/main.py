@@ -96,8 +96,11 @@ if __name__ == "__main__":
     """
     # test update
     master.version_manager.set_update_feed(update_feed)
-    master.version_manager.update_file("example1.py", update)
-    master.version_manager.update_file("example1.py", "test")
+    master.version_manager.update_file("dependencies.txt", "up1", depends_on=0)
+    master.version_manager.update_file("dependencies.txt", "up1\nup2", depends_on=1)
+    master.version_manager.update_file("dependencies.txt", "up1\nup2\nup3", depends_on=2)
+    master.version_manager.update_file("dependencies.txt", "up1\nup4", depends_on=1)
+    master.version_manager.update_file("dependencies.txt", "up1\nup4\nup5", depends_on=4)
 
     # ready
     return

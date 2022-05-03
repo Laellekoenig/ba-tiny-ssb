@@ -1,11 +1,24 @@
 import sys
-from typing import Optional
+from collections import deque
+from tinyssb.feed import Feed
 from tinyssb.ssb_util import to_var_int, from_var_int
+from typing import Callable, Optional
 
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
-    from typing import List, Tuple
+    from typing import List, Tuple, Dict
+
+
+def takewhile(predicate: Callable[[List[int]], bool], lst: List[int]) -> List[int]:
+    final_lst = []
+
+    for i in range(len(lst)):
+        if not predicate(lst[i:]):
+            break
+        final_lst.append(lst[i])
+
+    return final_lst
 
 
 def get_changes(old_version: str, new_version: str) -> List[Tuple[int, str, str]]:
@@ -58,11 +71,11 @@ def get_changes(old_version: str, new_version: str) -> List[Tuple[int, str, str]
     return changes
 
 
-def changes_to_bytes(changes: List[Tuple[int, str, str]]) -> bytes:
+def changes_to_bytes(changes: List[Tuple[int, str, str]], dependency: int) -> bytes:
     """
     Encodes a given list of changes into a single bytes string.
     """
-    b = b""
+    b = dependency.to_bytes(4, "big")
     for change in changes:
         i, op, ln = change  # unpack tuple
         b_change = to_var_int(i) + op.encode() + ln.encode()
@@ -70,7 +83,7 @@ def changes_to_bytes(changes: List[Tuple[int, str, str]]) -> bytes:
 
     return b
 
-def bytes_to_changes(changes: bytes) -> List[Tuple[int, str, str]]:
+def bytes_to_changes(changes: bytes) -> Tuple[List[Tuple[int, str, str]], int]:
     """
     Takes bytes that are encoded by get_file_changes() and returns
     the operations in a list.
@@ -79,6 +92,8 @@ def bytes_to_changes(changes: bytes) -> List[Tuple[int, str, str]]:
     - operation: I -> insert, D -> delete
     - line content
     """
+    dependency = int.from_bytes(changes[:4], "big")
+    changes = changes[4:]
     operations = []
     while len(changes) > 0:
         size, size_b = from_var_int(changes)
@@ -93,7 +108,7 @@ def bytes_to_changes(changes: bytes) -> List[Tuple[int, str, str]]:
 
         operations.append((line_num, operation, string))
 
-    return operations
+    return operations, dependency
 
 
 def apply_changes(content: str, changes: List[Tuple[int, str, str]]) -> str:
@@ -161,3 +176,98 @@ def reverse_changes(changes: List[Tuple[int, str, str]]) -> List[Tuple[int, str,
     changes = [(a, "I", c) if b == "D" else (a, "D", c) for a, b, c in changes]
     changes.reverse()
     return changes
+
+def jump_versions(start: int, end: int, feed: Feed) -> List[Tuple[int, str, str]]:
+    print("{} to {}".format(start, end))
+    # extract all versions and dependencies from feed
+    if start == end:
+        return []
+
+    num_updates = feed.count_chain20()
+
+    if start > num_updates or end > num_updates:
+        print("update not available yet")
+        return []
+
+    neighbors = {}
+    for i in range(1, num_updates + 1):
+        # get individual updates
+        update = feed.get_chain20(i)
+        # extract dependency
+        dep_on = int.from_bytes(update[:4], "big")
+
+        if i in neighbors:
+            neighbors[i] = neighbors[i] + [dep_on]
+        else:
+            neighbors[i] = [dep_on]
+
+        if dep_on in neighbors:
+            neighbors[dep_on] = neighbors[dep_on] + [i]
+        else:
+            neighbors[dep_on] = [i]
+
+    # do BFS on graph
+    update_path = _dfs(neighbors, start, end)
+    print(update_path)
+
+    mono_inc = lambda lst: all(x < y for x, y in zip(lst, lst[1:]))
+    mono_dec = lambda lst: all(x > y for x, y in zip(lst, lst[1:]))
+
+    all_changes = []
+
+    if mono_inc(update_path):
+        # apply all updates, ignore first
+        update_path.pop(0)
+        for step in update_path:
+            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            all_changes += changes
+
+    elif mono_dec(update_path):
+        # revert all updates, ignore last
+        update_path.pop()
+        for step in update_path:
+            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            all_changes += reverse_changes(changes)
+
+    else:
+        # first half revert, second half apply
+        # element after switch is ignored
+        not_mono_inc = lambda lst: not mono_inc(lst)
+        first_half = takewhile(not_mono_inc, update_path)
+        second_half = update_path[len(first_half) + 1:]  # ignore first element
+        print(first_half)
+        print(second_half)
+
+        for step in first_half:
+            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            all_changes += reverse_changes(changes)
+
+        for step in second_half:
+            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            all_changes += changes
+
+    return all_changes
+
+
+def _dfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
+    max_v = max([x for x, _ in graph.items()])
+    # label start as visited
+    visited = [True if i == start else False for i in range(max_v + 1)]
+    queue = deque()
+    queue.append([start])
+
+    while queue:
+        path = queue.popleft()
+        current = path[-1]
+
+        # check if path was found
+        if current == end:
+            return path
+
+        # explore neighbors
+        for n in graph[current]:
+            if not visited[n]:
+                queue.append(path + [n])
+
+    # should never get here
+    return []

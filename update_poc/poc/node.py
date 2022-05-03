@@ -246,7 +246,8 @@ class Node:
                 print(new)
 
             if inpt in ["a", "apply"]:
-                file_name = input("file name: ")
+                # file_name = input("file name: ")
+                file_name = "dependencies.txt"
                 seq = int(input("sequence number: "))
                 self.version_manager.add_apply(file_name, seq)
 
