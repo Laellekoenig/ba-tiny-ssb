@@ -271,7 +271,11 @@ class VersionManager:
         assert file_feed is not None
 
         # check if update already available
-        if file_feed.get_current_version_num() < seq:
+        if (
+            file_feed.get_current_version_num() is None
+            or file_feed.get_current_version_num() < seq
+        ):
+            print("waiting for update")
             self.apply_queue[fid] = seq
             self._save_config()
             return
@@ -279,9 +283,8 @@ class VersionManager:
         print(f"applying {seq}")
 
         # go backwards or forwards?
-        current_apply = self.vc_feed.get_newest_apply(file_feed.fid)
+        current_apply = self.vc_feed.get_previous_apply(file_feed.fid)
         if seq == current_apply:
-            self._save_config()
             return
 
         # get content from current file
@@ -326,7 +329,7 @@ class VersionManager:
         # get currently applied version and version number
         current_file = read_file(self.path, file_name)
         assert current_file is not None, "failed to read file"
-        current_apply = self.vc_feed.get_newest_apply(fid)
+        current_apply = self.vc_feed.get_previous_apply(fid)
 
         # check version numbers
         current_v = feed.get_current_version_num()
@@ -429,6 +432,11 @@ class VersionManager:
 
     def add_apply(self, file_name: str, seq: int) -> bool:
         assert self.vc_feed is not None, "no version control feed present"
+
+        if not self.may_update:
+            print("may not apply updates")
+            return False
+
         if file_name not in self.vc_dict:
             print("file not found")
             return False
@@ -447,9 +455,9 @@ class VersionManager:
             print("update does not exist yet")
             return False
 
-        self._apply_update(fid, seq)
-
         # add to version control feed
         self.vc_feed.add_apply(fid, seq)
+
+        self._apply_update(fid, seq)
 
         return True

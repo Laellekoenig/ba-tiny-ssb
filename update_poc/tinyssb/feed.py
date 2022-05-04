@@ -633,6 +633,23 @@ class Feed:
 
         return 0 
 
+    def get_previous_apply(self, fid: bytes) -> int:
+        """
+        Searches for the penultimate packet with the given fid and returns
+        its sequence number.
+        If no apply is found, 0 is returned.
+        """
+
+        last_found = False
+        for i in range(self.front_seq, self.anchor_seq, -1):
+            content = self[i]
+            if content[:32] == fid:
+                if not last_found:
+                    last_found = True
+                else:
+                    return int.from_bytes(content[32:36], "big")
+        return 0
+
     def get_update_blob(self, seq: int) -> Optional[bytes]:
         """
         returns the update blob with the given version number.
