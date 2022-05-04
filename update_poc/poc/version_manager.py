@@ -3,12 +3,10 @@ import os
 import sys
 from .version_util import (
     apply_changes,
-    bytes_to_changes,
     changes_to_bytes,
     get_changes,
     jump_versions,
     read_file,
-    reverse_changes,
     write_file,
 )
 from tinyssb.feed import Feed
@@ -19,7 +17,7 @@ from tinyssb.ssb_util import to_hex, create_keypair, from_hex
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
-    from typing import Tuple, Optional, Union
+    from typing import Optional, Union
 
 
 class VersionManager:
@@ -78,9 +76,7 @@ class VersionManager:
             "vc_dict": {
                 k: (to_hex(v[0]), to_hex(v[1])) for k, v in self.vc_dict.items()
             },
-            "apply_queue": {
-                to_hex(k): v for k, v in self.apply_queue.items()
-            },
+            "apply_queue": {to_hex(k): v for k, v in self.apply_queue.items()},
         }
         json_str = json.dumps(dictionary)
         write_file(self.path, self.cfg_file_name, json_str)
@@ -118,18 +114,18 @@ class VersionManager:
         # check monitored files
         files = os.listdir(self.path)
         for f in files:
-            if f not in self.vc_dict and f != self.cfg_file_name:
+            if f not in self.vc_dict and f != self.cfg_file_name and not f[0] == ".":
+                print(f)
                 # create new update feed for file
                 skey, vkey = create_keypair()
                 new = self.feed_manager.create_child_feed(self.update_feed, vkey, skey)
                 assert new is not None, "failed to create new file feed"
-                new.add_upd_file_name(f)  # add file name to feed
+                new.add_upd_file_name(f, 1)  # add file name to feed, start at version 1
 
                 # create emergency feed
                 skey, vkey = create_keypair()
                 emergency = self.feed_manager.create_child_feed(new, vkey, skey)
                 assert emergency is not None, "failed to create emergency feed"
-                emergency.add_upd_file_name(f)  # add file name to feed
 
                 # save to version control dictionary
                 self.vc_dict[f] = (new.fid, emergency.fid)
@@ -170,7 +166,6 @@ class VersionManager:
     def _vc_feed_callback(self, _: bytes) -> None:
         """
         Handles version control commands, once they are appended.
-        TODO: implement
         """
         assert self.vc_feed is not None, "version control feed not found"
 
@@ -184,9 +179,6 @@ class VersionManager:
             pkt = self.vc_feed[-1]
             fid, seq = pkt[:32], pkt[32:36]
             self._apply_update(fid, seq)
-
-        # TODO: apply updates according to version control feed
-        print("version control feed change")
 
     def _file_feed_callback(self, fid: bytes) -> None:
         """
@@ -223,8 +215,6 @@ class VersionManager:
             return
 
         if front_type == PacketType.chain20:
-            # TODO: not instantly apply update
-            # self._apply_update(feed.get_upd_file_name(), feed[-1])
             # check if has entry in queued updates
             if fid in self.apply_queue:
                 seq = self.apply_queue[fid]
@@ -281,8 +271,7 @@ class VersionManager:
         assert file_feed is not None
 
         # check if update already available
-        # TODO: going back to older sequence number
-        if file_feed.count_chain20() < seq:
+        if file_feed.get_current_version_num() < seq:
             self.apply_queue[fid] = seq
             self._save_config()
             return
@@ -301,14 +290,16 @@ class VersionManager:
         file = read_file(self.path, file_name)
         assert file is not None, "failed to read file"
 
-        changes = jump_versions(current_apply, seq, file_feed)
+        changes = jump_versions(current_apply, seq, file_feed, self.feed_manager)
         file = apply_changes(file, changes)
 
         # save updated file
         write_file(self.path, file_name, file)
         self._save_config()
 
-    def update_file(self, file_name: str, update: str, depends_on: int) -> Optional[Tuple[bytes, int]]:
+    def update_file(
+        self, file_name: str, update: str, depends_on: int
+    ) -> Optional[int]:
         """
         Computes the difference between a given file and update
         and appends the changes to the corresponding file update feed
@@ -325,21 +316,33 @@ class VersionManager:
         if file_name not in self.vc_dict:
             print("file does not exist")
             # TODO: create new file
-            return
+            return None
 
         # get feed
         fid, _ = self.vc_dict[file_name]
         feed = self.feed_manager.get_feed(fid)
         assert feed is not None, "failed to get feed"
 
-        # get difference between old file and new file
+        # get currently applied version and version number
         current_file = read_file(self.path, file_name)
         assert current_file is not None, "failed to read file"
+        current_apply = self.vc_feed.get_newest_apply(fid)
 
-        # check if there are updates that were not applied yet
-        newest_apply = self.vc_feed.get_newest_apply(fid)
+        # check version numbers
+        current_v = feed.get_current_version_num()
 
-        changes = jump_versions(newest_apply, depends_on, feed) 
+        # translate possible negative index of dependency
+        if depends_on < 0:
+            # -1 => latest update
+            depends_on = current_v + depends_on + 1
+
+        if depends_on > current_v:
+            print("dependency does not exist yet")
+            return None
+
+        # get changes
+        # TODO: dependency in parent
+        changes = jump_versions(current_apply, depends_on, feed, self.feed_manager)
         current_file = apply_changes(current_file, changes)
 
         # now calculate difference
@@ -349,13 +352,11 @@ class VersionManager:
         feed.append_blob(changes_to_bytes(update_changes, depends_on))
 
         # return update info
-        seq = feed.front_seq
-        return (fid, seq)
+        return feed.get_current_version_num()
 
     def emergency_update_file(
-        self, file_name: str, update: str
-    ) -> Optional[Tuple[bytes, int]]:
-        # TODO: update!
+        self, file_name: str, update: str, depends_on: int
+    ) -> Optional[int]:
         """
         Computes the difference between a given file and update
         and appends the changes to the corresponding emergency file update
@@ -363,6 +364,7 @@ class VersionManager:
         This makes the emergency feed the new main feed and a new emergency
         feed is created.
         """
+        assert self.vc_feed is not None, "need vc feed to update"
         if not self.may_update:
             print("may not append new updates")
             return
@@ -370,55 +372,84 @@ class VersionManager:
         if file_name not in self.vc_dict:
             return
 
-        # get changes
-        old_file = read_file(self.path, file_name)
-        assert old_file is not None, "failed to read file"
-        changes = get_changes(old_file, update)
-
-        # append to emergency feed
-        old_fid, fid = self.vc_dict[file_name]
-        emergency_feed = self.feed_manager.get_feed(fid)
+        # get feed
+        fid, emergency_fid = self.vc_dict[file_name]
+        feed = self.feed_manager.get_feed(fid)
+        assert feed is not None, "failed to get feed"
+        emergency_feed = self.feed_manager.get_feed(emergency_fid)
         assert emergency_feed is not None, "failed to get feed"
 
-        # create new emergency feed
+        # check dependency version number
+        current_v = feed.get_current_version_num()
+
+        # translate possible negative index of dependency
+        if depends_on < 0:
+            depends_on = current_v + depends_on + 1
+
+        # check dependency
+        if depends_on > current_v:
+            print("dependency does not exist yet")
+            return None
+
+        # get current file
+        current_file = read_file(self.path, file_name)
+        assert current_file is not None, "failed to read file"
+        current_apply = self.vc_feed.get_newest_apply(feed.fid)
+
+        # change current file to dependency
+        # TODO: dependency in parent
+        changes = jump_versions(current_apply, depends_on, feed, self.feed_manager)
+        current_file = apply_changes(current_file, changes)
+
+        # calculate update differences
+        update_changes = get_changes(current_file, update)
+
+        # update emergency feed info
+        # continue version count where parent stopped
+        new_v = current_v + 1
+        emergency_feed.add_upd_file_name(file_name, new_v)
+        # add new emergency feed
         skey, vkey = create_keypair()
         new_emergency = self.feed_manager.create_child_feed(emergency_feed, vkey, skey)
-        assert new_emergency is not None, "failed to create feed"
-        new_emergency.add_upd_file_name(file_name)
-
-        # append update to old emergency feed
-        emergency_feed.append_blob(changes_to_bytes(changes))
+        assert new_emergency is not None, "failed to create new feed"
+        # add update to old emergency feed
+        emergency_feed.append_blob(changes_to_bytes(update_changes, depends_on))
+        # add apply to version control feed
+        self.vc_feed.add_apply(emergency_feed.fid, new_v)
 
         # apply changes locally
-        new_file = apply_changes(old_file, changes)
-        write_file(self.path, file_name, new_file)
+        updated_file = apply_changes(current_file, update_changes)
+        write_file(self.path, file_name, updated_file)
 
-        # update info in version control dictionary
+        # update information in version control feed
         self.vc_dict[file_name] = (emergency_feed.fid, new_emergency.fid)
         self._save_config()
 
-    def add_apply(self, file_name: str, seq: int) -> None:
+        return new_v
+
+    def add_apply(self, file_name: str, seq: int) -> bool:
         assert self.vc_feed is not None, "no version control feed present"
         if file_name not in self.vc_dict:
             print("file not found")
-            return
-
+            return False
 
         # locally apply update
         fid, _ = self.vc_dict[file_name]
         feed = self.feed_manager.get_feed(fid)
         assert feed is not None, "failed to get feed"
 
-        # can't apply update that does not exist yet
-        if feed.count_chain20() < seq:
-            print("update does not exist yet")
-            return
-
+        # convert negative indices
         if seq < 0:
-            print("no negative versions")
-            return
+            seq = feed.get_current_version_num() + seq + 1
+
+        # can't apply update that does not exist yet
+        if feed.get_current_version_num() < seq:
+            print("update does not exist yet")
+            return False
 
         self._apply_update(fid, seq)
 
         # add to version control feed
         self.vc_feed.add_apply(fid, seq)
+
+        return True

@@ -144,13 +144,14 @@ class Feed:
         """
         Returns the ith chain20 packet of the feed.
         Returns None if it does not exist.
+        0 index.
         """
         update_count = 0
         for i in range(self.anchor_seq + 1, self.front_seq + 1):
             if self.get_type(i) == PacketType.chain20:
-                update_count += 1
                 if update_count == seq:
                     return self[i]
+                update_count += 1
         return None
 
     def count_chain20(self) -> int:
@@ -535,16 +536,17 @@ class Feed:
             next_seq = self.front_seq.to_bytes(4, "big")
             return want_dmx + self.fid + next_seq + blob_ptr
 
-    def add_upd_file_name(self, file_name: Union[str, bytes]) -> None:
+    def add_upd_file_name(self, file_name: Union[str, bytes], v_number: int=0) -> None:
         """
         Adds the given file name to this feed in the form of an
         updfile packet.
         """
         assert self.skey is not None, "need signing key to append pkt"
         assert self.front_mid is not None, "no front mid found"
+        assert v_number >= 0, "version number can't be negative"
 
         pkt = create_upd_pkt(self.fid, self.front_seq + 1, self.front_mid,
-                             file_name, self.skey)
+                             file_name, v_number, self.skey)
         self.append_pkt(pkt)
 
     def get_upd_file_name(self) -> Optional[str]:
@@ -559,6 +561,30 @@ class Feed:
                 length, num_bytes = from_var_int(file_name)
                 return file_name[num_bytes:length + 1].decode()
         return None
+
+    def get_upd_version(self) -> Optional[int]:
+        """
+        Returns the version number that is stored in the upd packet.
+        If no upd packet is appended, None is returned.
+        """
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            if self.get_type(i) == PacketType.updfile:
+                content = self[i]
+                length, num_bytes = from_var_int(content)
+                offset = length + num_bytes
+                return int.from_bytes(content[offset:offset + 4], "big")
+        return None
+
+    def get_current_version_num(self) -> Optional[int]:
+        """
+        Computes the version number of the newest update.
+        """
+        base_version = self.get_upd_version()
+        if base_version is None:
+            return None
+
+        num_updates = self.count_chain20()
+        return base_version + num_updates - 1  # base version is equal to the first blob
 
     def add_wait_for(self, wait_for_seq: Union[int, bytes]) -> None:
         """
@@ -606,3 +632,21 @@ class Feed:
                     return int.from_bytes(content[32:36], "big")
 
         return 0 
+
+    def get_update_blob(self, seq: int) -> Optional[bytes]:
+        """
+        returns the update blob with the given version number.
+        If the version number is not found, None is returned.
+        """
+        min_version = self.get_upd_version()
+        if min_version is None:
+            return None
+
+        max_version = self.get_current_version_num()
+        if max_version is None:
+            return None
+
+        if seq < min_version or seq > max_version:
+            return None
+
+        return self.get_chain20(seq - min_version)

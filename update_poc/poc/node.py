@@ -9,6 +9,7 @@ from .version_manager import VersionManager
 from hashlib import sha256
 from tinyssb.feed_manager import FeedManager
 from tinyssb.ssb_util import to_hex
+from .version_util import print_version_tree
 
 # non-micropython import
 if sys.implementation.name != "micropython":
@@ -236,9 +237,10 @@ class Node:
                 print(self.feed_manager)
 
             if inpt in ["e", "emergency"]:
-                file_name = "example1.py"
-                update = "print(\"hello emergency\")"
-                self.version_manager.emergency_update_file(file_name, update)
+                file_name = "test.txt"
+                update = "emergency"
+                depends_on = int(input("depends on:"))
+                self.version_manager.emergency_update_file(file_name, update, depends_on)
 
             if inpt in ["c"]:
                 call = self.feed_manager._callback
@@ -247,13 +249,27 @@ class Node:
 
             if inpt in ["a", "apply"]:
                 # file_name = input("file name: ")
-                file_name = "dependencies.txt"
+                file_name = "test.txt"
                 seq = int(input("sequence number: "))
                 self.version_manager.add_apply(file_name, seq)
 
             if inpt in ["sudo"]:
                 cmd = input("cmd: ")
                 exec(cmd)
+
+            if inpt in ["u", "update"]:
+                file_name = "test.txt"
+                update = input("update: ")
+                dep = int(input("depends on: "))
+                self.version_manager.update_file(file_name, update, dep)
+
+            if inpt in ["t", "tree"]:
+                assert self.version_manager.vc_feed is not None
+                file_name = "test.txt"
+                file_fid, _ = self.version_manager.vc_dict[file_name]
+                file_feed = self.feed_manager.get_feed(file_fid)
+                apply = self.version_manager.vc_feed.get_newest_apply(file_fid)
+                print_version_tree(file_feed, self.feed_manager, apply)
 
     def io(self) -> None:
         """

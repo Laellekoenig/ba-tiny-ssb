@@ -80,27 +80,13 @@ def init() -> None:
     vc_feed = master.feed_manager.create_child_feed(update_feed, vk, sk)
     assert vc_feed is not None, "failed to create vc feed"
 
-    update = """import os
-
-def example() -> None:
-    print("Hello World!")
-
-
-def main() -> int:
-    print("testing update")
-    example()
-    return 1
-
-if __name__ == "__main__":
-    main()
-    """
     # test update
     master.version_manager.set_update_feed(update_feed)
-    master.version_manager.update_file("dependencies.txt", "up1", depends_on=0)
-    master.version_manager.update_file("dependencies.txt", "up1\nup2", depends_on=1)
-    master.version_manager.update_file("dependencies.txt", "up1\nup2\nup3", depends_on=2)
-    master.version_manager.update_file("dependencies.txt", "up1\nup4", depends_on=1)
-    master.version_manager.update_file("dependencies.txt", "up1\nup4\nup5", depends_on=4)
+    master.version_manager.update_file("test.txt", "up1", depends_on=0)
+    master.version_manager.update_file("test.txt", "up1\nup2", depends_on=1)
+    master.version_manager.update_file("test.txt", "up1\nup2\nup3", depends_on=2)
+    master.version_manager.update_file("test.txt", "up1\nup4", depends_on=1)
+    master.version_manager.update_file("test.txt", "up1\nup4\nup5", depends_on=4)
 
     # ready
     return

@@ -281,12 +281,13 @@ def create_contn_pkt(fid: bytes, payload: bytes, skey: bytes) -> Packet:
 
 
 def create_upd_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
-                   file_name: Union[str, bytes], skey: bytes) -> Packet:
+                   file_name: Union[str, bytes], v_number: int, skey: bytes) -> Packet:
     """
     Creates and returns a packet, indicating the corresponding file name
-    of a given file update feed.
+    of a given file update feed. Also contains the sequence number of the most
+    recent update.
     """
-    assert len(file_name) < 48, "file name name must be 47B or less"
+    assert len(file_name) < 44, "file name name must be 43B or less"
     if type(file_name) is str:
         file_name = file_name.encode()
     assert type(file_name) is bytes, "string to bytes conversion failed"
@@ -295,7 +296,9 @@ def create_upd_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
         seq = (2).to_bytes(4, "big")
     assert type(seq) is bytes, "int to bytes conversion failed"
 
-    payload = to_var_int(len(file_name)) + file_name
+    v_number_b = v_number.to_bytes(4, "big")
+
+    payload = to_var_int(len(file_name)) + file_name + v_number_b
     return Packet(fid, seq, prev_mid, payload,
                   pkt_type=PacketType.updfile, skey=skey)
 

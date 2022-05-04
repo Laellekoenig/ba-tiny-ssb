@@ -1,7 +1,8 @@
 import sys
 from collections import deque
 from tinyssb.feed import Feed
-from tinyssb.ssb_util import to_var_int, from_var_int
+from tinyssb.feed_manager import FeedManager
+from tinyssb.ssb_util import to_var_int, from_var_int, to_hex
 from typing import Callable, Optional
 
 # non-micropython import
@@ -177,38 +178,119 @@ def reverse_changes(changes: List[Tuple[int, str, str]]) -> List[Tuple[int, str,
     changes.reverse()
     return changes
 
-def jump_versions(start: int, end: int, feed: Feed) -> List[Tuple[int, str, str]]:
-    print("{} to {}".format(start, end))
-    # extract all versions and dependencies from feed
-    if start == end:
-        return []
+def print_version_tree(feed: Feed, feed_manager: FeedManager, applied: Optional[int]=None) -> None:
+    graph, _ = extract_version_tree(feed, feed_manager)
+    max_v = max([x for x, _ in graph.items()])
+    visited = [True] + [False for _ in range(max_v)]
+    queue = deque()
+    queue.append([0])
+    paths = []
 
-    num_updates = feed.count_chain20()
+    while queue:
+        path = queue.popleft()
+        current = path[-1]
 
-    if start > num_updates or end > num_updates:
-        print("update not available yet")
-        return []
+        if all([visited[x] for x in graph[current]]):
+            paths.append(path)
 
-    neighbors = {}
-    for i in range(1, num_updates + 1):
+        for n in graph[current]:
+            if not visited[n]:
+                visited[n] = True
+                queue.append(path + [n])
+
+    nxt = lambda x, lst: lst[lst.index(x) + 1]
+    already_printed = []
+    for path in paths:
+        string = ""
+        top = ""
+        bottom = ""
+        for step in path:
+            if step in already_printed and nxt(step, path) not in already_printed:
+                string += "  '----> "
+                top += "  |      "
+                bottom += " " * 9
+            elif step in already_printed:
+                string += " " * 9 
+                top += " " * 9
+                bottom += " " * 9
+            else:
+                already_printed.append(step)
+                if applied == step:
+                    string += ": {} : -> ".format(step)
+                    top += ".....    "
+                    bottom += ".....    "
+                else:
+                    string += "| {} | -> ".format(step)
+                    top += "+---+    "
+                    bottom += "+---+    "
+
+        print(top)
+        print(string)
+        print(bottom)
+
+
+def extract_version_tree(feed: Feed, feed_manager: FeedManager) -> Tuple[Dict[int, List[int]], Dict[int, Feed]]:
+    # get max version
+    access_dict = {}
+    max_version = -1
+    current_feed = feed
+    while True:
+        minv = current_feed.get_upd_version()
+        if minv is None:
+            break
+
+        maxv = current_feed.get_current_version_num()
+        if maxv is None:
+            break
+
+        max_version = max(maxv, max_version)
+
+        # add feed to access dict
+        for i in range(minv, maxv + 1):
+            access_dict[i] = current_feed
+
+        # advance to next feed
+        parent_fid = current_feed.get_parent()
+        if parent_fid is None:
+            break
+
+        current_feed = feed_manager.get_feed(parent_fid)
+
+    tree = {}
+    for i in range(1, max_version + 1):
         # get individual updates
-        update = feed.get_chain20(i)
+        access_feed = access_dict[i]
+        update = access_feed.get_update_blob(i)
         # extract dependency
         dep_on = int.from_bytes(update[:4], "big")
 
-        if i in neighbors:
-            neighbors[i] = neighbors[i] + [dep_on]
+        if i in tree:
+            tree[i] = tree[i] + [dep_on]
         else:
-            neighbors[i] = [dep_on]
+            tree[i] = [dep_on]
 
-        if dep_on in neighbors:
-            neighbors[dep_on] = neighbors[dep_on] + [i]
+        if dep_on in tree:
+            tree[dep_on] = tree[dep_on] + [i]
         else:
-            neighbors[dep_on] = [i]
+            tree[dep_on] = [i]
+
+    return tree, access_dict
+
+
+def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -> List[Tuple[int, str, str]]:
+    # nothing changes
+    if start == end:
+        return []
+
+    neighbors, access_dict = extract_version_tree(feed, feed_manager)
+    max_version = max([x for x, _ in access_dict.items()])
+
+    if start > max_version or end > max_version:
+        print("update not available yet")
+        return []
 
     # do BFS on graph
     update_path = _dfs(neighbors, start, end)
-    print(update_path)
 
     mono_inc = lambda lst: all(x < y for x, y in zip(lst, lst[1:]))
     mono_dec = lambda lst: all(x > y for x, y in zip(lst, lst[1:]))
@@ -219,14 +301,16 @@ def jump_versions(start: int, end: int, feed: Feed) -> List[Tuple[int, str, str]
         # apply all updates, ignore first
         update_path.pop(0)
         for step in update_path:
-            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            access_feed = access_dict[step]
+            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
             all_changes += changes
 
     elif mono_dec(update_path):
         # revert all updates, ignore last
         update_path.pop()
         for step in update_path:
-            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            access_feed = access_dict[step]
+            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
             all_changes += reverse_changes(changes)
 
     else:
@@ -235,15 +319,15 @@ def jump_versions(start: int, end: int, feed: Feed) -> List[Tuple[int, str, str]
         not_mono_inc = lambda lst: not mono_inc(lst)
         first_half = takewhile(not_mono_inc, update_path)
         second_half = update_path[len(first_half) + 1:]  # ignore first element
-        print(first_half)
-        print(second_half)
 
         for step in first_half:
-            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            access_feed = access_dict[step]
+            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
             all_changes += reverse_changes(changes)
 
         for step in second_half:
-            changes, _ = bytes_to_changes(feed.get_chain20(step))
+            access_feed = access_dict[step]
+            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
             all_changes += changes
 
     return all_changes
@@ -267,6 +351,7 @@ def _dfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
         # explore neighbors
         for n in graph[current]:
             if not visited[n]:
+                visited[n] = True
                 queue.append(path + [n])
 
     # should never get here
