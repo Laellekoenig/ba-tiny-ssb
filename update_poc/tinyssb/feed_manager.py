@@ -1,7 +1,6 @@
 import _thread
 import os
 import sys
-from types import coroutine
 from .feed import Feed
 from .packet import (
     PacketType,

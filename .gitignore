@@ -6,6 +6,7 @@
 _blobs/
 _logs/
 data/
+large_update/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

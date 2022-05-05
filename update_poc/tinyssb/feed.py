@@ -633,7 +633,7 @@ class Feed:
 
         return 0 
 
-    def get_previous_apply(self, fid: bytes) -> int:
+    def get_previous_apply(self, fid: bytes, offset: int=0) -> int:
         """
         Searches for the penultimate packet with the given fid and returns
         its sequence number.
@@ -645,7 +645,10 @@ class Feed:
             content = self[i]
             if content[:32] == fid:
                 if not last_found:
-                    last_found = True
+                    if offset == 0:
+                        last_found = True
+                    else:
+                        offset -= 1
                 else:
                     return int.from_bytes(content[32:36], "big")
         return 0
@@ -667,3 +670,37 @@ class Feed:
             return None
 
         return self.get_chain20(seq - min_version)
+
+    def get_dependency(self, seq: int) -> Optional[int]:
+        min_version = self.get_upd_version()
+        if min_version is None:
+            return None
+
+        max_version = self.get_current_version_num()
+        if max_version is None:
+            return None
+
+        if seq < min_version or seq > max_version:
+            return None
+
+        update_count = 0
+        head_wire = None
+        for i in range(self.anchor_seq + 1, self.front_seq + 1):
+            if self.get_type(i) == PacketType.chain20:
+                if update_count == seq - min_version:
+                    # found
+                    head_wire = self.get_wire(i)
+                    break
+                update_count += 1
+
+        if head_wire is None:
+            return None
+
+        # extract dependency
+        payload = head_wire[8:56]
+        _, nbytes = from_var_int(payload)
+        # cut off var int
+        payload = payload[nbytes:]
+        dependency = int.from_bytes(payload[:4], "big")
+
+        return dependency

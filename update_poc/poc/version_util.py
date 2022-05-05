@@ -2,7 +2,7 @@ import sys
 from collections import deque
 from tinyssb.feed import Feed
 from tinyssb.feed_manager import FeedManager
-from tinyssb.ssb_util import to_var_int, from_var_int, to_hex
+from tinyssb.ssb_util import to_var_int, from_var_int 
 from typing import Callable, Optional
 
 # non-micropython import
@@ -259,10 +259,12 @@ def extract_version_tree(feed: Feed, feed_manager: FeedManager) -> Tuple[Dict[in
     tree = {}
     for i in range(1, max_version + 1):
         # get individual updates
-        access_feed = access_dict[i]
-        update = access_feed.get_update_blob(i)
-        # extract dependency
-        dep_on = int.from_bytes(update[:4], "big")
+        if i not in access_dict:
+            # missing dependency
+            continue
+        dep_on = access_dict[i].get_dependency(i)
+        if dep_on is None:
+            print("WARNING dependency is None in extract tree")
 
         if i in tree:
             tree[i] = tree[i] + [dep_on]
@@ -290,7 +292,7 @@ def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -
         return []
 
     # do BFS on graph
-    update_path = _dfs(neighbors, start, end)
+    update_path = _bfs(neighbors, start, end)
 
     mono_inc = lambda lst: all(x < y for x, y in zip(lst, lst[1:]))
     mono_dec = lambda lst: all(x > y for x, y in zip(lst, lst[1:]))
@@ -333,7 +335,7 @@ def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -
     return all_changes
 
 
-def _dfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
+def _bfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
     max_v = max([x for x, _ in graph.items()])
     # label start as visited
     visited = [True if i == start else False for i in range(max_v + 1)]

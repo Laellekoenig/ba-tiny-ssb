@@ -341,7 +341,7 @@ def create_apply_pkt(fid: bytes, seq: Union[bytes, int], prev_mid: bytes,
 
     # create payload
     payload = file_fid + update_seq
-    
+
     return Packet(fid, seq, prev_mid, payload,
                   pkt_type=PacketType.applyup, skey=skey)
 

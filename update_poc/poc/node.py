@@ -239,7 +239,7 @@ class Node:
             if inpt in ["e", "emergency"]:
                 file_name = "test.txt"
                 update = "emergency"
-                depends_on = int(input("depends on:"))
+                depends_on = int(input("depends on: "))
                 self.version_manager.emergency_update_file(file_name, update, depends_on)
 
             if inpt in ["c"]:
@@ -270,6 +270,19 @@ class Node:
                 file_feed = self.feed_manager.get_feed(file_fid)
                 apply = self.version_manager.vc_feed.get_newest_apply(file_fid)
                 print_version_tree(file_feed, self.feed_manager, apply)
+
+            if inpt in ["l", "large"]:
+                # large update
+                file_name = "test.txt"
+
+                # read 'large' file (6MB)
+                f = open("large_update/data.csv")
+                update = f.read()
+                f.close()
+
+                # add update
+                dep = int(input("depends on: "))
+                self.version_manager.update_file(file_name, update, dep)
 
     def io(self) -> None:
         """

@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from typing_extensions import Self
 from .version_util import (
     apply_changes,
     changes_to_bytes,
@@ -33,13 +34,13 @@ class VersionManager:
         self.feed_manager = feed_manager
 
         self.vc_dict = {}  # version control dictionary
+        self.apply_queue = {}
+        self.apply_dict = {}
         self._load_config()
 
         self.update_feed = None
         self.vc_feed = None
         self.may_update = False
-
-        self.apply_queue = {}
 
     def __del__(self) -> None:
         self._save_config()
@@ -55,6 +56,7 @@ class VersionManager:
             # no config found -> empty dict
             self.vc_dict = {}
             self.apply_queue = {}
+            self.apply_dict = {}
         else:
             # file exists
             json_str = read_file(self.path, self.cfg_file_name)
@@ -67,6 +69,7 @@ class VersionManager:
             self.apply_queue = {
                 from_hex(k): int(v) for k, v in str_dict["apply_queue"].items()
             }
+            self.apply_dict = str_dict["apply_dict"]
 
     def _save_config(self) -> None:
         """
@@ -77,6 +80,7 @@ class VersionManager:
                 k: (to_hex(v[0]), to_hex(v[1])) for k, v in self.vc_dict.items()
             },
             "apply_queue": {to_hex(k): v for k, v in self.apply_queue.items()},
+            "apply_dict" : self.apply_dict,
         }
         json_str = json.dumps(dictionary)
         write_file(self.path, self.cfg_file_name, json_str)
@@ -102,10 +106,8 @@ class VersionManager:
         # check if the key is available -> allowed to write new updates
         if to_hex(self.update_feed.fid) not in self.feed_manager.keys:
             self.may_update = False
-            # register callback function, in case that new update arrives
-            self.feed_manager.register_callback(
-                update_feed.fid, self._update_feed_callback
-            )
+            # register callbacks update feeds
+            self._register_callbacks()
             return
 
         self.may_update = True
@@ -115,7 +117,6 @@ class VersionManager:
         files = os.listdir(self.path)
         for f in files:
             if f not in self.vc_dict and f != self.cfg_file_name and not f[0] == ".":
-                print(f)
                 # create new update feed for file
                 skey, vkey = create_keypair()
                 new = self.feed_manager.create_child_feed(self.update_feed, vkey, skey)
@@ -129,6 +130,7 @@ class VersionManager:
 
                 # save to version control dictionary
                 self.vc_dict[f] = (new.fid, emergency.fid)
+                self.apply_dict[f] = 0
 
         self._save_config()
 
@@ -211,6 +213,8 @@ class VersionManager:
 
             # add to version control dict
             self.vc_dict[file_name] = (feed.fid, emergency_fid)
+            if file_name not in self.apply_dict:
+                self.apply_dict[file_name] = 0
             self._save_config()
             return
 
@@ -218,7 +222,6 @@ class VersionManager:
             # check if has entry in queued updates
             if fid in self.apply_queue:
                 seq = self.apply_queue[fid]
-                self.apply_queue.pop(fid, None)
                 self._apply_update(fid, seq)
 
     def _emergency_feed_callback(self, fid: bytes) -> None:
@@ -268,7 +271,15 @@ class VersionManager:
         assert type(seq) is int
 
         file_feed = self.feed_manager.get_feed(fid)
-        assert file_feed is not None
+        if file_feed is None:
+            # wait
+            print("waiting for feed")
+            if fid in self.apply_queue and self.apply_queue[fid] == seq:
+                # already waiting
+                return
+            self.apply_queue[fid] = seq
+            self._save_config()
+            return
 
         # check if update already available
         if (
@@ -276,16 +287,26 @@ class VersionManager:
             or file_feed.get_current_version_num() < seq
         ):
             print("waiting for update")
+            if fid in self.apply_queue and self.apply_queue[fid] == seq:
+                # already in queue
+                return
+
+            self.apply_queue[fid] = seq
+            self._save_config()
+            return
+
+        # check if blob is complete
+        if file_feed.get_current_version_num() == seq and file_feed.waiting_for_blob():
+            print("waiting for blob")
+            if fid in self.apply_queue and self.apply_queue[fid] == seq:
+                # already in queue
+                return
+
             self.apply_queue[fid] = seq
             self._save_config()
             return
 
         print(f"applying {seq}")
-
-        # go backwards or forwards?
-        current_apply = self.vc_feed.get_previous_apply(file_feed.fid)
-        if seq == current_apply:
-            return
 
         # get content from current file
         file_name = file_feed.get_upd_file_name()
@@ -293,11 +314,18 @@ class VersionManager:
         file = read_file(self.path, file_name)
         assert file is not None, "failed to read file"
 
+        current_apply = self.apply_dict[file_name]
+        if seq == current_apply:
+            return
+
         changes = jump_versions(current_apply, seq, file_feed, self.feed_manager)
         file = apply_changes(file, changes)
 
         # save updated file
         write_file(self.path, file_name, file)
+        if fid in self.apply_queue:
+            del self.apply_queue[fid]
+        self.apply_dict[file_name] = seq
         self._save_config()
 
     def update_file(
@@ -329,7 +357,8 @@ class VersionManager:
         # get currently applied version and version number
         current_file = read_file(self.path, file_name)
         assert current_file is not None, "failed to read file"
-        current_apply = self.vc_feed.get_previous_apply(fid)
+        # current_apply = self.vc_feed.get_newest_apply(fid)
+        current_apply = self.apply_dict[file_name]
 
         # check version numbers
         current_v = feed.get_current_version_num()
@@ -397,7 +426,8 @@ class VersionManager:
         # get current file
         current_file = read_file(self.path, file_name)
         assert current_file is not None, "failed to read file"
-        current_apply = self.vc_feed.get_newest_apply(feed.fid)
+        # current_apply = self.vc_feed.get_newest_apply(feed.fid)
+        current_apply = self.apply_dict[file_name]
 
         # change current file to dependency
         # TODO: dependency in parent
@@ -426,6 +456,7 @@ class VersionManager:
 
         # update information in version control feed
         self.vc_dict[file_name] = (emergency_feed.fid, new_emergency.fid)
+        self.apply_dict[file_name] = new_v
         self._save_config()
 
         return new_v
@@ -461,3 +492,35 @@ class VersionManager:
         self._apply_update(fid, seq)
 
         return True
+
+    def _register_callbacks(self) -> None:
+        """
+        Registers all the necessary callback functions to the update, version
+        control and file feeds.
+        """
+        if self.update_feed is None:
+            return
+
+        # update feed
+        self.feed_manager.register_callback(
+            self.update_feed.fid, self._update_feed_callback
+        )
+
+        # check for version control feed
+        children = self.update_feed.get_children()
+        if len(children) < 1:
+            return
+
+        self.feed_manager.register_callback(
+            children.pop(0), self._vc_feed_callback  # version control feed
+        )
+
+        # register callbacks on file feeds
+        for item in self.vc_dict:
+            file_fid, emergency_fid = self.vc_dict[item]
+
+            self.feed_manager.register_callback(file_fid, self._file_feed_callback)
+
+            self.feed_manager.register_callback(
+                emergency_fid, self._emergency_feed_callback
+            )
