@@ -12,10 +12,15 @@ from .packet import (
 from .ssb_util import from_hex, is_file, to_hex
 from hashlib import sha256
 
+
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
     from typing import Optional, Union, Dict, Callable, Tuple
+
+
+# helper lambdas
+to_feed = lambda x, fm: x if type(x) is Feed else fm.get_feed(x)
 
 
 class FeedManager:
@@ -45,7 +50,7 @@ class FeedManager:
 
     def __str__(self) -> str:
         """
-        Used for visualizing all currently available feeds.
+        Used for printing a visualization of all feeds to the console.
         """
         string_builder = []
         for feed in self.feeds:
@@ -93,6 +98,17 @@ class FeedManager:
     def __getitem__(self, i: int) -> Feed:
         return self.feeds[i]
 
+    def _check_dirs(self):
+        """
+        Checks whether the _feeds and _blobs directories already exist.
+        If not, new directories are created.
+        """
+        # TODO: recursive creation of directories in subdirectories
+        if not is_file(self.feed_dir):
+            os.mkdir(self.feed_dir)
+        if not is_file(self.blob_dir):
+            os.mkdir(self.blob_dir)
+
     def register_callback(self, fid: Union[bytes, Feed], function) -> None:
         """
         Registers the given function as a callback function for the given feed.
@@ -117,7 +133,7 @@ class FeedManager:
         if type(fid) is Feed:
             fid = fid.fid
         assert type(fid) is bytes, "failed to get FID from feed"
-        
+
         if fid not in self._callback:
             return
 
@@ -132,7 +148,7 @@ class FeedManager:
     def update_keys(self, keys: Dict[str, str]) -> None:
         """
         Replaces the current keys dictionary with the given one.
-        Also updates the keys in every feed instance -> allows appending.
+        Also updates the keys in every feed instance -> may allow appending
         """
         self.keys = keys
 
@@ -171,8 +187,8 @@ class FeedManager:
         self, msg: bytes
     ) -> Optional[Tuple[Callable[[bytes, bytes], None], bytes]]:
         """
-        Returns the corresponding handling function and FID for a given
-        DMX value. If no entry is found, None is returned.
+        Returns the handling function and FID for a given DMX value.
+        If no entry is found, None is returned.
         The handling function can be called as follows:
         fn, fid = consult_dmx(dmx)
         fn(fid)
@@ -186,17 +202,6 @@ class FeedManager:
         fn, fid = self.dmx_table[msg]
         self.dmx_lock.release()
         return (fn, fid)
-
-    def _check_dirs(self):
-        """
-        Checks whether the _feeds and _blobs directories already exist.
-        If not, new directories are created.
-        """
-        # TODO: recursive creation of directories in subdirectories
-        if not is_file(self.feed_dir):
-            os.mkdir(self.feed_dir)
-        if not is_file(self.blob_dir):
-            os.mkdir(self.blob_dir)
 
     def _get_feeds(self) -> list[Feed]:
         """
@@ -218,22 +223,21 @@ class FeedManager:
         in the self.keys dictionary.
         """
         fid = fn.split(".")[0]
-        try:
-            return from_hex(self.keys[fid])
-        except Exception:
+        if fid not in self.keys:
             return None
+
+        return from_hex(self.keys[fid])
 
     def get_feed(self, fid: Union[bytes, str]) -> Optional[Feed]:
         """
         Searches for a specific Feed instance in self.feeds.
-        The feed ID can be handed in as bytes, a hex string
-        or a file name.
+        The feed ID can be handed in as bytes, a hex string or a file name.
         Returns 'None' if the feed cannot be found.
         """
         # transform to bytes
         if type(fid) is str:
             if fid.endswith(".log"):
-                fid = fid[:-4]
+                fid = fid[:-4]  # cut off file suffix
             fid = from_hex(fid)
 
         # search
@@ -295,7 +299,7 @@ class FeedManager:
         # create log file
         file_name = self.feed_dir + "/" + to_hex(fid) + ".log"
         if is_file(file_name):
-            return None
+            return None  # file already exists, do not overwrite
 
         # build header of feed
         header = bytes(12) + fid + parent_fid + parent_seq
@@ -332,15 +336,10 @@ class FeedManager:
         Creates and returns a new child Feed instance for the given parent.
         The parent can be passed either as a Feed instance, feed ID bytes,
         feed ID hex string or file name.
-        The child feed ID must be explicitly defined.
-        The signing key must be provided.
+        The child feed ID must be explicitly defined and the signing key must be provided.
         """
-        parent = None
         # feed conversion
-        if type(parent_fid) is Feed:
-            parent = parent_fid
-        if type(parent_fid) is bytes:
-            parent = self.get_feed(parent_fid)
+        parent = to_feed(parent_fid, self)
 
         # check properties of parent
         if parent is None or parent.skey is None or parent.front_mid is None:
@@ -382,12 +381,8 @@ class FeedManager:
         The continuation feed ID must be explicitly defined and
         the signing key must be provided.
         """
-        ending_feed = None
         # feed conversion
-        if type(end_fid) is Feed:
-            ending_feed = end_fid
-        if type(end_fid) is bytes:
-            ending_feed = self.get_feed(end_fid)
+        ending_feed = to_feed(end_fid, self)
 
         # check properties of ending feed
         if (
@@ -438,7 +433,7 @@ class FeedManager:
 
         requested_wire = None
         if len(request) == 43:
-            # regular feed entry request
+            #  packet request
             requested_wire = requested_feed.get_wire(seq)
             if requested_wire is None:
                 print("pkt does not exist yet")
@@ -450,7 +445,6 @@ class FeedManager:
             requested_blob = requested_feed._get_blob(blob_ptr)
             if requested_blob is None:
                 print("did not find blob")
-                # blob not found
                 return
             requested_wire = requested_blob.wire
 
@@ -461,10 +455,10 @@ class FeedManager:
         Handles an incoming new packet.
         It is appended to the correct feed (if is can be verified).
         After appending, the DMX table is updated.
-        Also creates new feeds, if the newly appended packet asks for it.
-        At the end of the function all the registered callback functions are
-        executed.
+        Also creates new feeds, if the newly appended packet is of type mk_child.
+        At the end of the function all the registered callback functions are executed.
         """
+        dmx = wire[:7]
         feed = self.get_feed(fid)
         assert feed is not None, "failed to get feed"
 
@@ -476,26 +470,17 @@ class FeedManager:
         next_dmx = feed.get_next_dmx()
         blob_ptr = feed.waiting_for_blob()
 
-        if next_dmx == wire[:7] and blob_ptr is None:
+        if next_dmx == dmx and blob_ptr is None:
             # nothing new was appended
             return
 
         # remove old DMX value and insert new value
         self.dmx_lock.acquire()
+        del self.dmx_table[dmx]
 
-        self.dmx_table.pop(wire[:7], None)
         if blob_ptr is None:
             # expecting packet
             self.dmx_table[next_dmx] = (self.handle_packet, feed.fid)
-
-            # debugging
-            front_type = feed.get_type(-1)
-            if front_type is PacketType.plain48 or front_type is PacketType.chain20:
-                # print(feed[-1])
-                pass
-            if front_type is PacketType.updfile:
-                # print("new update feed: {}".format(feed.get_upd_file_name()))
-                pass
         else:
             # expecting blob
             self.dmx_table[blob_ptr] = (self.handle_blob, feed.fid)
@@ -506,17 +491,15 @@ class FeedManager:
 
         # check if new continuation or child feed should be created
         front_type = feed.get_type(-1)
-        new_fid = wire[8:40]
-
-        if front_type == PacketType.mkchild or front_type == PacketType.contdas:
-            _ = self.create_feed(
-                new_fid, parent_fid=feed.fid, parent_seq=feed.front_seq
-            )
+        if front_type in [PacketType.contdas, PacketType.mkchild]:
+            new_fid = wire[8:40]
+            self.create_feed(new_fid, parent_seq=feed.front_seq, parent_fid=fid)
 
         # execute callbacks
         if fid in self._callback:
             functions = self._callback[fid]
             for function in functions:
+                # execute in separate threads?
                 function(fid)
 
     def handle_blob(self, fid: bytes, blob: bytes) -> None:
@@ -538,13 +521,12 @@ class FeedManager:
 
         # update table: remove old pointer
         self.dmx_lock.acquire()
-        self.dmx_table.pop(signature, None)
+        del self.dmx_table[signature]
         self.dmx_lock.release()
 
         # check if blob has ended
         next_ptr = feed.waiting_for_blob()
         if next_ptr is None:
-            # print(feed[-1])
             self.dmx_lock.acquire()
             # add dmx for next packet
             self.dmx_table[feed.get_next_dmx()] = (self.handle_packet, fid)
@@ -554,6 +536,7 @@ class FeedManager:
             if fid in self._callback:
                 functions = self._callback[fid]
                 for function in functions:
+                    # execute in separate threads?
                     function(fid)
             return
 

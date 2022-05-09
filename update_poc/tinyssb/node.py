@@ -5,11 +5,12 @@ import socket
 import struct
 import sys
 import time
+from .feed_manager import FeedManager
+from .ssb_util import to_hex
 from .version_manager import VersionManager
+from .version_util import print_version_graph
 from hashlib import sha256
-from tinyssb.feed_manager import FeedManager
-from tinyssb.ssb_util import to_hex
-from .version_util import print_version_tree
+
 
 # non-micropython import
 if sys.implementation.name != "micropython":
@@ -21,7 +22,7 @@ class Node:
     """
     A very basic client for the tinyssb network.
     Uses UDP multicast to communicate with other nodes.
-    The send queue is very naïve.
+    The sending queue is very naïve.
     """
 
     parent_dir = "data"
@@ -33,7 +34,7 @@ class Node:
         self.path = self.parent_dir + "/" + name
         # setup directories
         self._create_dirs()
-        # create feed manager
+        # create feed and version managers
         self.feed_manager = FeedManager(self.path)
         self.version_manager = VersionManager(self.path + "/code", self.feed_manager)
         self.master_fid = None
@@ -63,36 +64,22 @@ class Node:
         if "code" not in os.listdir(self.path):
             os.mkdir(self.path + "/code")
 
-    def _start_version_control(self) -> bool:
+    def save_config(self) -> None:
         """
-        Completes the configuration of the version manager
-        once the update feed is available.
+        Writes the current master FID and FID-key-pairs into a json file.
         """
-        if self.master_fid is None:
-            return False
+        config = {}
+        config["keys"] = self.feed_manager.keys
+        config["master_fid"] = self.master_fid
 
-        # get master feed
-        master_feed = self.feed_manager.get_feed(self.master_fid)
-        if master_feed is None:
-            return False
-
-        # check if update feed already exists -> second child
-        children = master_feed.get_children()
-        if len(children) < 2:
-            return False
-
-        update_feed = self.feed_manager.get_feed(children[1])
-
-        # configure and start version manager
-        self.version_manager.set_update_feed(update_feed)
-        return True
+        f = open(self.path + "/" + self.cfg_file_name, "w")
+        f.write(json.dumps(config))
+        f.close()
 
     def _load_config(self) -> None:
         """
-        Loads the contents of the self.cfg_file_name file into this
-        instance of the Node.
-        The config contains the FIDs with associated keys and the FID
-        of the master feed.
+        Loads the contents of the self.cfg_file_name file into this instance of Node.
+        The config contains the FIDs with associated keys and the FID of the master feed.
         """
         file_path = self.path + "/" + self.cfg_file_name
         config = None
@@ -124,18 +111,6 @@ class Node:
         if not self.version_manager.is_configured():
             self._start_version_control()
 
-    def save_config(self) -> None:
-        """
-        Writes the current master FID and FID-key-pairs into a json file.
-        """
-        config = {}
-        config["keys"] = self.feed_manager.keys
-        config["master_fid"] = self.master_fid
-
-        f = open(self.path + "/" + self.cfg_file_name, "w")
-        f.write(json.dumps(config))
-        f.close()
-
     def set_master_fid(self, fid: Union[bytes, str]) -> None:
         """
         Used for manually setting this node's master feed.
@@ -145,6 +120,31 @@ class Node:
             fid = to_hex(fid)
         self.master_fid = fid
         self.save_config()
+
+    def _start_version_control(self) -> bool:
+        """
+        Completes the configuration of the version manager
+        once the update feed is available.
+        """
+        if self.master_fid is None:
+            return False
+
+        # get master feed
+        master_feed = self.feed_manager.get_feed(self.master_fid)
+        if master_feed is None:
+            return False
+
+        # check if update feed already exists -> second child
+        children = master_feed.get_children()
+        if len(children) < 2:
+            return False
+
+        update_feed = self.feed_manager.get_feed(children[1])
+        assert update_feed is not None, "failed to get feed"
+
+        # configure and start version manager
+        self.version_manager.set_update_feed(update_feed)
+        return True
 
     def _send(self, sock: socket.socket) -> None:
         """
@@ -163,7 +163,7 @@ class Node:
                 msg = bytes(8) + msg  # add reserved 8B
                 sock.sendto(msg, self.multicast_group)
 
-            time.sleep(0.2)
+            time.sleep(0.2)  # add some delay
 
     def _listen(self, sock: socket.socket, own: int) -> None:
         """
@@ -182,6 +182,7 @@ class Node:
             # new message
             msg = msg[8:]  # cut off reserved 8B
             msg_hash = sha256(msg).digest()[:20]
+
             # check if message is blob
             tpl = self.feed_manager.consult_dmx(msg_hash)
             if tpl is not None:
@@ -190,25 +191,26 @@ class Node:
                 fn(fid, msg)  # call
                 continue
 
-            # not a blob
+            # packet or request
             dmx = msg[:7]
             tpl = self.feed_manager.consult_dmx(dmx)
             if tpl is not None:
                 (fn, fid) = tpl  # unpack
                 requested_wire = fn(fid, msg)
-                # check if version control already running
-                if not self.version_manager.is_configured():
-                    self._start_version_control()
+
                 if requested_wire is not None:
-                    # send requested packet -> add it to queue
+                    # request -> add packet to queue
                     self.queue_lock.acquire()
                     self.queue.append(requested_wire)
                     self.queue_lock.release()
 
+                # check if version control already running (in case update feed has arrived)
+                if not self.version_manager.is_configured():
+                    self._start_version_control()
+
     def _want_feeds(self):
         """
-        Infinite loop that adds "wants" to the queue
-        -> Asks for new feed entries.
+        Infinite loop that adds "wants" to the queue -> Asks for new feed entries.
         Very naïve implementation.
         """
         while True:
@@ -228,7 +230,7 @@ class Node:
 
             time.sleep(1.5)
 
-    def user_input(self):
+    def _user_input(self):
         while True:
             inpt = input()
 
@@ -240,12 +242,9 @@ class Node:
                 file_name = "test.txt"
                 update = "emergency"
                 depends_on = int(input("depends on: "))
-                self.version_manager.emergency_update_file(file_name, update, depends_on)
-
-            if inpt in ["c"]:
-                call = self.feed_manager._callback
-                new = {to_hex(k)[:8]: v for k, v in call.items()}
-                print(new)
+                self.version_manager.emergency_update_file(
+                    file_name, update, depends_on
+                )
 
             if inpt in ["a", "apply"]:
                 # file_name = input("file name: ")
@@ -268,8 +267,9 @@ class Node:
                 file_name = "test.txt"
                 file_fid, _ = self.version_manager.vc_dict[file_name]
                 file_feed = self.feed_manager.get_feed(file_fid)
+                assert file_feed is not None, "failed to get feed"
                 apply = self.version_manager.vc_feed.get_newest_apply(file_fid)
-                print_version_tree(file_feed, self.feed_manager, apply)
+                print_version_graph(file_feed, self.feed_manager, apply)
 
             if inpt in ["l", "large"]:
                 # large update
@@ -286,13 +286,13 @@ class Node:
 
     def io(self) -> None:
         """
-        Starts one listening and one sending thread.
+        Starts one listening and one sending threads.
         """
-        # sending sockets
+        # sending socket
         s_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s_sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
         s_sock.bind(("", 0))
-        # for now use port number to filter out own messages
+        # use port number to filter out own messages
         _, port = s_sock.getsockname()
 
         # receiving socket
@@ -303,9 +303,15 @@ class Node:
         mreq = struct.pack("=4sl", socket.inet_aton("224.1.1.1"), socket.INADDR_ANY)
         r_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
-        _thread.start_new_thread(self._listen, (r_sock, port,))
+        _thread.start_new_thread(
+            self._listen,
+            (
+                r_sock,
+                port,
+            ),
+        )
         _thread.start_new_thread(self._send, (s_sock,))
-        _thread.start_new_thread(self.user_input, ())
+        _thread.start_new_thread(self._user_input, ())
 
         # keep main thread alive
         self._want_feeds()

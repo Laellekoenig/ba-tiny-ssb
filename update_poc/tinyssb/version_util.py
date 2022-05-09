@@ -1,9 +1,10 @@
 import sys
+from .feed import Feed
+from .feed_manager import FeedManager
+from .ssb_util import to_var_int, from_var_int
 from collections import deque
-from tinyssb.feed import Feed
-from tinyssb.feed_manager import FeedManager
-from tinyssb.ssb_util import to_var_int, from_var_int 
 from typing import Callable, Optional
+
 
 # non-micropython import
 if sys.implementation.name != "micropython":
@@ -12,6 +13,10 @@ if sys.implementation.name != "micropython":
 
 
 def takewhile(predicate: Callable[[List[int]], bool], lst: List[int]) -> List[int]:
+    """
+    Takes (does not remove) items from the given list until the given predicate is
+    no longer satisfied. Returns these elements in a new list.
+    """
     final_lst = []
 
     for i in range(len(lst)):
@@ -26,7 +31,7 @@ def get_changes(old_version: str, new_version: str) -> List[Tuple[int, str, str]
     """
     Takes two strings as input, the first being the old file and the second one
     being the updated version. Determines the insert and delete operations
-    required to get from old version to new version.
+    required to get from the old version to new version.
     These changes are returned as tuples consisting of:
     - line number
     - operation: D -> delete, I -> insert
@@ -49,22 +54,21 @@ def get_changes(old_version: str, new_version: str) -> List[Tuple[int, str, str]
         # lines are different
         if old_l not in new_lines:
             # line was deleted
-            # TODO: content of deleted line necessary? -> allow reverts?
             changes.append((line_num, "D", old_l))
-            new_lines.insert(0, new_l)  # put new line back
+            new_lines.insert(0, new_l)  # retry new line in next iteration
             continue
 
         # old line occurs later in file -> insert new line
-        old_lines.insert(0, old_l)  # return to list
+        old_lines.insert(0, old_l)  # retry new line in next iteration
 
         changes.append((line_num, "I", new_l))
         line_num += 1
 
-    # old lines left -> must be deleted
+    # old line(s) left -> must be deleted
     for line in old_lines:
         changes.append((line_num, "D", line))
 
-    # new line left -> insert at end
+    # new line(s) left -> insert at end
     for line in new_lines:
         changes.append((line_num, "I", line))
         line_num += 1
@@ -74,21 +78,21 @@ def get_changes(old_version: str, new_version: str) -> List[Tuple[int, str, str]
 
 def changes_to_bytes(changes: List[Tuple[int, str, str]], dependency: int) -> bytes:
     """
-    Encodes a given list of changes into a single bytes string.
+    Encodes a given list of changes into bytes. These can be appended to a feed.
     """
     b = dependency.to_bytes(4, "big")
     for change in changes:
-        i, op, ln = change  # unpack tuple
+        i, op, ln = change  # unpack triple
         b_change = to_var_int(i) + op.encode() + ln.encode()
         b += to_var_int(len(b_change)) + b_change
 
     return b
 
+
 def bytes_to_changes(changes: bytes) -> Tuple[List[Tuple[int, str, str]], int]:
     """
-    Takes bytes that are encoded by get_file_changes() and returns
-    the operations in a list.
-    Every operation is a tuple containing:
+    Takes bytes that are encoded by get_file_changes() and returns the operations in a list.
+    Every operation is a triple containing:
     - line_number
     - operation: I -> insert, D -> delete
     - line content
@@ -117,19 +121,16 @@ def apply_changes(content: str, changes: List[Tuple[int, str, str]]) -> str:
     Applies every operation in the given list to the given string.
     The definition of an operation can be found in bytes_to_changes().
     """
-
     old_lines = content.split("\n")
 
     for change in changes:
         line_num, op, content = change
         line_num -= 1  # adjust for 0 index
 
-        if op == "I":
-            # insert
+        if op == "I":  # insert
             old_lines.insert(line_num, content)
 
-        if op == "D":
-            # delete
+        if op == "D":  # delete
             del old_lines[line_num]
 
     return "\n".join(old_lines)
@@ -156,10 +157,11 @@ def write_file(path: str, file_name: str, content: str) -> bool:
     Overwrites the content of a given file with the given content.
     Returns True on success.
     """
+    msg = "writing to file: {}".format(file_name)
+    separator = '"' * len(msg)
+    print("\n".join([msg, separator]))
+
     try:
-        msg = "writing file: {}".format(file_name)
-        separator = "\"" * len(msg)
-        print("\n".join([msg, separator]))
         f = open(path + "/" + file_name, "w")
         f.write(content)
         f.close()
@@ -172,18 +174,25 @@ def write_file(path: str, file_name: str, content: str) -> bool:
 def reverse_changes(changes: List[Tuple[int, str, str]]) -> List[Tuple[int, str, str]]:
     """
     Reverses the effects of the given list of changes.
+    These are returned as a new list of changes.
     """
-
     changes = [(a, "I", c) if b == "D" else (a, "D", c) for a, b, c in changes]
     changes.reverse()
     return changes
 
-def print_version_tree(feed: Feed, feed_manager: FeedManager, applied: Optional[int]=None) -> None:
-    graph, _ = extract_version_tree(feed, feed_manager)
+
+def print_version_graph(
+    feed: Feed, feed_manager: FeedManager, applied: Optional[int] = None
+) -> None:
+    """
+    Prints a representation of the current update dependency graph. The currently
+    applied update is highlighted.
+    """
+    graph, _ = extract_version_graph(feed, feed_manager)
     max_v = max([x for x, _ in graph.items()])
-    visited = [True] + [False for _ in range(max_v)]
+    visited = [True] + [False for _ in range(max_v)]  # mark version 0 as visited
     queue = deque()
-    queue.append([0])
+    queue.append([0])  # start from version 0
     paths = []
 
     while queue:
@@ -198,7 +207,7 @@ def print_version_tree(feed: Feed, feed_manager: FeedManager, applied: Optional[
                 visited[n] = True
                 queue.append(path + [n])
 
-    nxt = lambda x, lst: lst[lst.index(x) + 1]
+    nxt = lambda x, lst: lst[lst.index(x) + 1]  # helper lambda
     already_printed = []
     for path in paths:
         string = ""
@@ -210,7 +219,7 @@ def print_version_tree(feed: Feed, feed_manager: FeedManager, applied: Optional[
                 top += "  |      "
                 bottom += " " * 9
             elif step in already_printed:
-                string += " " * 9 
+                string += " " * 9
                 top += " " * 9
                 bottom += " " * 9
             else:
@@ -224,12 +233,22 @@ def print_version_tree(feed: Feed, feed_manager: FeedManager, applied: Optional[
                     top += "+---+    "
                     bottom += "+---+    "
 
+        # print line
         print(top)
         print(string)
         print(bottom)
 
 
-def extract_version_tree(feed: Feed, feed_manager: FeedManager) -> Tuple[Dict[int, List[int]], Dict[int, Feed]]:
+def extract_version_graph(
+    feed: Feed, feed_manager: FeedManager
+) -> Tuple[Dict[int, List[int]], Dict[int, Feed]]:
+    """
+    Creates a graph, representing all update dependencies that are present in the
+    given feed. The graph is represented as dictionary, where the key is the version
+    number of a node and the value is a list of neighboring version numbers.
+    Returns a tuple containing the graph dictionary and a dictionary containing
+    access information for each node (since entries can be part of parent feed).
+    """
     # get max version
     access_dict = {}
     max_version = -1
@@ -255,36 +274,44 @@ def extract_version_tree(feed: Feed, feed_manager: FeedManager) -> Tuple[Dict[in
             break
 
         current_feed = feed_manager.get_feed(parent_fid)
+        assert current_feed is not None, "failed to get parent"
 
-    tree = {}
+    # construct version graph
+    graph = {}
     for i in range(1, max_version + 1):
         # get individual updates
         if i not in access_dict:
-            # missing dependency
-            continue
+            continue  # missing dependency
+
         dep_on = access_dict[i].get_dependency(i)
         if dep_on is None:
-            print("WARNING dependency is None in extract tree")
+            print("WARNING dependency is None in extract tree")  # for debugging
 
-        if i in tree:
-            tree[i] = tree[i] + [dep_on]
+        if i in graph:
+            graph[i] = graph[i] + [dep_on]
         else:
-            tree[i] = [dep_on]
+            graph[i] = [dep_on]
 
-        if dep_on in tree:
-            tree[dep_on] = tree[dep_on] + [i]
+        if dep_on in graph:
+            graph[dep_on] = graph[dep_on] + [i]
         else:
-            tree[dep_on] = [i]
+            graph[dep_on] = [i]
 
-    return tree, access_dict
+    return graph, access_dict
 
 
-def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -> List[Tuple[int, str, str]]:
-    # nothing changes
+def jump_versions(
+    start: int, end: int, feed: Feed, feed_manager: FeedManager
+) -> List[Tuple[int, str, str]]:
+    """
+    Computes the changes needed to get from starting version to ending version.
+    These changes are returned as a list of triples.
+    """
     if start == end:
-        return []
+        return []  # nothing changes
 
-    neighbors, access_dict = extract_version_tree(feed, feed_manager)
+    # get dependency graph
+    graph, access_dict = extract_version_graph(feed, feed_manager)
     max_version = max([x for x, _ in access_dict.items()])
 
     if start > max_version or end > max_version:
@@ -292,8 +319,13 @@ def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -
         return []
 
     # do BFS on graph
-    update_path = _bfs(neighbors, start, end)
+    update_path = _bfs(graph, start, end)
 
+    # three different types of paths:
+    # [1, 2, 3, 4] -> only apply: 1 already applied, apply 2, 3, 4
+    # [4, 3, 2, 1] -> only revert: revert 4, 3, 2 to get to version 1
+    # [2, 1, 3, 4] -> revert first, then apply: revert 2, apply 3, 4
+    # [1, 2, 1, 3] -> does not exist (not shortest path)
     mono_inc = lambda lst: all(x < y for x, y in zip(lst, lst[1:]))
     mono_dec = lambda lst: all(x > y for x, y in zip(lst, lst[1:]))
 
@@ -304,7 +336,9 @@ def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -
         update_path.pop(0)
         for step in update_path:
             access_feed = access_dict[step]
-            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
+            update_blob = access_feed.get_update_blob(step)
+            assert update_blob is not None, "failed to get update blob"
+            changes, _ = bytes_to_changes(update_blob)
             all_changes += changes
 
     elif mono_dec(update_path):
@@ -312,7 +346,9 @@ def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -
         update_path.pop()
         for step in update_path:
             access_feed = access_dict[step]
-            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
+            update_blob = access_feed.get_update_blob(step)
+            assert update_blob is not None, "failed to get update blob"
+            changes, _ = bytes_to_changes(update_blob)
             all_changes += reverse_changes(changes)
 
     else:
@@ -320,23 +356,32 @@ def jump_versions(start: int, end: int, feed: Feed, feed_manager: FeedManager) -
         # element after switch is ignored
         not_mono_inc = lambda lst: not mono_inc(lst)
         first_half = takewhile(not_mono_inc, update_path)
-        second_half = update_path[len(first_half) + 1:]  # ignore first element
+        second_half = update_path[len(first_half) + 1 :]  # ignore first element
 
         for step in first_half:
             access_feed = access_dict[step]
-            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
+            update_blob = access_feed.get_update_blob(step)
+            assert update_blob is not None, "failed to get update blob"
+            changes, _ = bytes_to_changes(update_blob)
             all_changes += reverse_changes(changes)
 
         for step in second_half:
             access_feed = access_dict[step]
-            changes, _ = bytes_to_changes(access_feed.get_update_blob(step))
+            update_blob = access_feed.get_update_blob(step)
+            assert update_blob is not None, "failed to get update blob"
+            changes, _ = bytes_to_changes(update_blob)
             all_changes += changes
 
     return all_changes
 
 
 def _bfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
+    """
+    Performs breadth-first search on a given graph from starting to ending node.
+    Returns the shortest path as a list of version numbers.
+    """
     max_v = max([x for x, _ in graph.items()])
+
     # label start as visited
     visited = [True if i == start else False for i in range(max_v + 1)]
     queue = deque()

@@ -2,7 +2,7 @@ import os
 import pure25519
 import shutil
 import sys
-from poc.node import Node
+from tinyssb.node import Node
 from typing import Tuple
 
 

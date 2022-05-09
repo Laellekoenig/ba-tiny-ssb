@@ -14,8 +14,7 @@ else:
 
 def is_file(file_name: str) -> bool:
     """
-    Checks whether the given file name exists.
-    Works for directories and files.
+    Checks whether the given file name exists. Works for directories and files.
     Supports checking for files in subdirectories (e.g. 'example/file.txt').
     Directory names may not end with '/'.
     """
@@ -53,9 +52,9 @@ def to_var_int(i: int) -> bytes:
     assert i >= 0, "var int must be positive"
     if i <= 252:
         return bytes([i])
-    if i <= 0xffff:
+    if i <= 0xFFFF:
         return b"\xfd" + i.to_bytes(2, "little")
-    if i <= 0xffffffff:
+    if i <= 0xFFFFFFFF:
         return b"\xfe" + i.to_bytes(4, "little")
     return b"\xff" + i.to_bytes(8, "little")
 
@@ -63,30 +62,28 @@ def to_var_int(i: int) -> bytes:
 def from_var_int(b: bytes) -> Tuple[int, int]:
     """
     Transforms a 'Variable Integer' back to its int representation.
-    Returns the converted int and the number of bytes used by the VarInt
-    representation.
+    Returns the converted int and the number of bytes used by the VarInt representation.
     """
     assert len(b) >= 1
     head = b[0]
     if head <= 252:
         return (head, 1)
     assert len(b) >= 3
-    if head == 0xfd:
+    if head == 0xFD:
         return (int.from_bytes(b[1:3], "little"), 3)
     assert len(b) >= 5
-    if head == 0xfe:
+    if head == 0xFE:
         return (int.from_bytes(b[1:5], "little"), 5)
     assert len(b) >= 9
-    return (int.from_bytes(b[1:9], "little"), 9)
+    return int.from_bytes(b[1:9], "little"), 9
 
 
 def create_keypair() -> Tuple[bytes, bytes]:
     """
     Creates a key pair for signing with elliptic curve.
-    Both keys are 32B and are returned as a tuple
-    (signing key first, verification key second).
+    Both keys are 32B and are returned as a tuple (signing key first, verification key second).
     """
     key, _ = pure25519.create_keypair()
     skey = key.sk_s[:32]
     vkey = key.vk_s
-    return (skey, vkey)
+    return skey, vkey

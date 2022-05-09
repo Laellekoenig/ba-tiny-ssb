@@ -32,16 +32,17 @@ class Crypto:
     work on Pycom devices.
     Not used anymore (replaced by ed25519).
     """
+
     sha256 = None
 
     def __init__(self, key: bytes = b"bad key"):
         self._key = key
         # calc ipad and opad
         self._ipad = self._calc_pad(0x36)
-        self._opad = self._calc_pad(0x5c)
+        self._opad = self._calc_pad(0x5C)
 
     def _calc_pad(self, const: int) -> bytearray:
-        """"
+        """ "
         Used for calculating inner and outer pad for HMAC.
         """
         n_bytes = len(self._key)
@@ -67,7 +68,7 @@ class Crypto:
         """
         self._key = key
         self._ipad = self._calc_pad(0x36)
-        self._opad = self._calc_pad(0x5c)
+        self._opad = self._calc_pad(0x5C)
 
     def get_signature(self, msg: bytes) -> bytes:
         """
