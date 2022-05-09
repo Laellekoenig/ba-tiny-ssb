@@ -181,19 +181,24 @@ def reverse_changes(changes: List[Tuple[int, str, str]]) -> List[Tuple[int, str,
     return changes
 
 
-def print_version_graph(
+def string_version_graph(
     feed: Feed, feed_manager: FeedManager, applied: Optional[int] = None
-) -> None:
+) -> str:
     """
     Prints a representation of the current update dependency graph. The currently
     applied update is highlighted.
     """
     graph, _ = extract_version_graph(feed, feed_manager)
+
+    if graph == {}:
+        return ""  # nothing appended to update graph yet
+
     max_v = max([x for x, _ in graph.items()])
     visited = [True] + [False for _ in range(max_v)]  # mark version 0 as visited
     queue = deque()
     queue.append([0])  # start from version 0
     paths = []
+    final_str = ""
 
     while queue:
         path = queue.popleft()
@@ -233,10 +238,8 @@ def print_version_graph(
                     top += "+---+    "
                     bottom += "+---+    "
 
-        # print line
-        print(top)
-        print(string)
-        print(bottom)
+        final_str += "\n".join([top, string, bottom, ""])
+    return final_str
 
 
 def extract_version_graph(

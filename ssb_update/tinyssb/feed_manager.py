@@ -86,8 +86,8 @@ class FeedManager:
                     if len(substring) > max_len:
                         max_len = len(substring)
 
-            separator = "¨" * max_len
-            string_builder.insert(0, separator)
+            # separator = "¨" * max_len
+            # string_builder.insert(0, separator)
             string_builder.append("")
 
         return "\n".join(string_builder)

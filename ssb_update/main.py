@@ -93,7 +93,7 @@ def init() -> None:
 
 
 def master() -> None:
-    master = Node("master")
+    master = Node("master", enable_http=True)
     master.io()
 
 

@@ -6,9 +6,10 @@ import struct
 import sys
 import time
 from .feed_manager import FeedManager
+from .html import HTMLVisualizer
 from .ssb_util import to_hex
 from .version_manager import VersionManager
-from .version_util import print_version_graph
+from .version_util import string_version_graph
 from hashlib import sha256
 
 
@@ -29,7 +30,7 @@ class Node:
     multicast_group = ("224.1.1.1", 5000)
     cfg_file_name = "node_cfg.json"
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, enable_http: bool = False) -> None:
         self.name = name
         self.path = self.parent_dir + "/" + name
         # setup directories
@@ -44,6 +45,12 @@ class Node:
         # support threading
         self.queue = []
         self.queue_lock = _thread.allocate_lock()
+
+        self.html = None
+        if self.master_fid is not None and enable_http:
+            self.html = HTMLVisualizer(
+                self.master_fid, self.feed_manager, self.version_manager
+            )
 
     def __del__(self):
         self.save_config()
@@ -269,13 +276,13 @@ class Node:
                 file_feed = self.feed_manager.get_feed(file_fid)
                 assert file_feed is not None, "failed to get feed"
                 apply = self.version_manager.vc_feed.get_newest_apply(file_fid)
-                print_version_graph(file_feed, self.feed_manager, apply)
+                print(string_version_graph(file_feed, self.feed_manager, apply))
 
             if inpt in ["l", "large"]:
                 # large update
                 file_name = "test.txt"
 
-                # read 'large' file (6MB)
+                # read 'large' file (1MB)
                 f = open("large_update/data.csv")
                 update = f.read()
                 f.close()
@@ -283,6 +290,58 @@ class Node:
                 # add update
                 dep = int(input("depends on: "))
                 self.version_manager.update_file(file_name, update, dep)
+
+    def _hhtp_server(self, server_socket: socket.socket) -> None:
+        while True:
+            client_sock, _ = server_socket.accept()
+            _thread.start_new_thread(self._handle_http, (client_sock,))
+
+    def _handle_http(self, client_sock: socket.socket) -> None:
+        assert self.html is not None, "no HTMLVisualizer initialized"
+        msg = client_sock.recv(4096)
+
+        if len(msg) == 0:
+            client_sock.close()
+            return
+
+        # get request
+        request = msg.decode().split("\n")
+        if len(request) == 0:
+            client_sock.close()
+            return
+
+        get = request[0]
+        if "GET" not in get:
+            client_sock.close()
+            return
+
+        # extract command
+        cmd = get.split(" ")[1]
+
+        page = None
+
+        # handle depending on cmd
+        if cmd in ["/", "/feed_status"]:
+            page = self.html.get_main_menu()
+
+        if cmd == "/version_status":
+            page = self.html.get_version_status()
+
+        if cmd == "/file_browser":
+            page = self.html.get_file_browser()
+
+        if cmd.startswith("/get_file"):
+            file_name = cmd[len("/get_file_"):]
+            page = self.html.get_file(file_name)
+
+        if page is None:
+            client_sock.close()
+            return
+
+        # send requested content
+        to_response = lambda x: "HTTP/1.0 200 OK\n\n{}".format(x).encode()
+        client_sock.sendall(to_response(page))
+        client_sock.close()
 
     def io(self) -> None:
         """
@@ -312,6 +371,15 @@ class Node:
         )
         _thread.start_new_thread(self._send, (s_sock,))
         _thread.start_new_thread(self._user_input, ())
+
+        # start http server if enabled
+        if self.html is not None:
+            # http socket
+            server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_sock.bind(("0.0.0.0", 8000))
+            server_sock.listen(1)
+            _thread.start_new_thread(self._hhtp_server, (server_sock,))
 
         # keep main thread alive
         self._want_feeds()
