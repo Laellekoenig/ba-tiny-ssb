@@ -12,7 +12,7 @@ if sys.implementation.name != "micropython":
     from typing import List, Tuple, Dict
 
 
-def takewhile(predicate: Callable[[List[int]], bool], lst: List[int]) -> List[int]:
+def _takewhile(predicate: Callable[[List[int]], bool], lst: List[int]) -> List[int]:
     """
     Takes (does not remove) items from the given list until the given predicate is
     no longer satisfied. Returns these elements in a new list.
@@ -358,7 +358,7 @@ def jump_versions(
         # first half revert, second half apply
         # element after switch is ignored
         not_mono_inc = lambda lst: not mono_inc(lst)
-        first_half = takewhile(not_mono_inc, update_path)
+        first_half = _takewhile(not_mono_inc, update_path)
         second_half = update_path[len(first_half) + 1 :]  # ignore first element
 
         for step in first_half:

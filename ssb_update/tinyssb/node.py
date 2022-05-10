@@ -310,6 +310,12 @@ class Node:
             client_sock.close()
             return
 
+        if "POST" in request[0]:
+            # update received
+            self._handle_http_update(request[0], client_sock, request[-1])
+            client_sock.close()
+            return
+
         get = request[0]
         if "GET" not in get:
             client_sock.close()
@@ -330,18 +336,85 @@ class Node:
         if cmd == "/file_browser":
             page = self.html.get_file_browser()
 
-        if cmd.startswith("/get_file"):
+        if cmd.startswith("/get_file_version"):
+            file_name = cmd[len("/get_file_version_"):]
+            page = self.html.get_file(file_name, version=True)
+
+        elif cmd.startswith("/get_file"):
             file_name = cmd[len("/get_file_"):]
             page = self.html.get_file(file_name)
 
+        if cmd == "/create_new_file":
+            page = self.html.get_create_new_file()
+
+        if cmd.startswith("/new_file_"):
+            # reformat file name
+            file_name = cmd[len("/new_file_"):]
+            dot_index= file_name.rfind("_")
+            file_name = file_name[:dot_index] + "." + file_name[dot_index + 1:]
+
+            # create new file
+            self.version_manager.create_new_file(file_name)
+
+            # serve page
+            page = self.html.get_new_file()
+
+        if cmd.startswith("/apply"):
+            cmd = cmd[len("/apply_"):]  # cut off prefix
+
+            # get version number and file name
+            split = cmd.split("_")
+            v = int(split[-1])
+            file_name = "_".join(split[:-2]) + "." + split[-2]
+
+            # apply update
+            self.version_manager.add_apply(file_name, v)
+
+            # serve page
+            page = self.html.get_version_status()
+
+        if cmd.startswith("/edit"):
+            cmd = cmd[len("/edit_"):]
+            split = cmd.split("_")
+            v = int(split[-1])
+            file_name = "_".join(split[:-2]) + "." + split[-2]
+            page = self.html.get_edit_file(file_name, v)
+
         if page is None:
-            client_sock.close()
-            return
+            page = self.html.get_404()
 
         # send requested content
         to_response = lambda x: "HTTP/1.0 200 OK\n\n{}".format(x).encode()
         client_sock.sendall(to_response(page))
         client_sock.close()
+
+    def _handle_http_update(self, post: str, client_sock: socket.socket, request: str) -> None:
+        assert self.html is not None
+        emergency = "emergency_update" in post
+
+        if emergency:
+            post = post[len("POST /emergency_update_"):]
+        else:
+            post = post[len("POST /update_"):]
+
+        cmd = post.split(" ")[0]
+        split = cmd.split("_")
+        v_num = int(split[-1])
+        file_name = "_".join(split[:-2])+ "." + split[-2]
+
+        # json -> string
+        code = json.loads(request)
+
+        # add update
+        if emergency:
+            self.version_manager.emergency_update_file(file_name, code, v_num)
+            print("emergency")
+        else:
+            self.version_manager.update_file(file_name, code, v_num)
+        print("added update")
+
+        # send response
+        client_sock.sendall(b"ok")
 
     def io(self) -> None:
         """

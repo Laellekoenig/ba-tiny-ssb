@@ -1,5 +1,6 @@
 import json
 import os
+from socket import create_server
 import sys
 from .feed import Feed
 from .feed_manager import FeedManager
@@ -536,3 +537,29 @@ class VersionManager:
         self._apply_update(fid, v_num)
 
         return True
+
+    def create_new_file(self, file_name: str) -> None:
+        assert self.update_feed is not None
+        print("creating new file: {}".format(file_name))
+
+        if file_name in os.listdir(self.path):
+            print("file already exists")
+            return
+
+        write_file(self.path, file_name, "")
+
+        # create new feed
+        skey, vkey = create_keypair()
+        feed = self.feed_manager.create_child_feed(self.update_feed, vkey, skey)
+        assert feed is not None
+        feed.add_upd_file_name(file_name, 1)
+
+        # create emergency feed
+        skey, vkey = create_keypair()
+        emergency = self.feed_manager.create_child_feed(feed, vkey, skey)
+        assert emergency is not None
+
+        # add to config
+        self.vc_dict[file_name] = (feed.fid, emergency.fid)
+        self.apply_dict[file_name] = 0
+        self._save_config()
