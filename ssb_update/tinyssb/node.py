@@ -305,7 +305,7 @@ class Node:
             return
 
         # get request
-        request = msg.decode().split("\n")
+        request = msg.decode("utf-8").split("\n")
         if len(request) == 0:
             client_sock.close()
             return
@@ -403,15 +403,15 @@ class Node:
         file_name = "_".join(split[:-2])+ "." + split[-2]
 
         # json -> string
-        code = json.loads(request)
+        code = repr(request[1:-1])[1:-1]  # cut off "" and ''
+        code = code.replace("\\\\n", "\n")
+        code = code.replace("\\\\t", "\t")
 
         # add update
         if emergency:
             self.version_manager.emergency_update_file(file_name, code, v_num)
-            print("emergency")
         else:
             self.version_manager.update_file(file_name, code, v_num)
-        print("added update")
 
         # send response
         client_sock.sendall(b"ok")
