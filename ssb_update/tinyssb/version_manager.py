@@ -264,8 +264,11 @@ class VersionManager:
             return
 
         if front_type == PacketType.updfile:
-            # TODO: do something?
-            return
+            file_name = feed.get_upd_file_name()
+            assert file_name is not None
+            # create file if it does not exist
+            if file_name not in os.listdir(self.path):
+                write_file(self.path, file_name, "")
 
     def _emergency_feed_callback(self, fid: bytes) -> None:
         """

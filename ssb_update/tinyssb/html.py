@@ -225,7 +225,6 @@ class HTMLVisualizer:
         newest_apply = self.version_manager.vc_feed.get_newest_apply(fid)
         if version_num == -1:
             version_num = newest_apply
-        version_title = "v{}".format(version_num)
 
         # read contents of file
         content = read_file(self.version_manager.path, file_name)
@@ -337,7 +336,6 @@ class HTMLVisualizer:
         ]
         return self.bob_the_page_builder(elements, script=script)
 
-    # TODO: js better string encoding -> \n
     def get_edit_file(self, file_name: str, version: int) -> str:
         """
         Returns the file editor for the selected file name and version.
@@ -376,7 +374,7 @@ class HTMLVisualizer:
                         try {{
                             const response = await fetch(cmd, {{
                                 method: "POST",
-                                body: JSON.stringify(text), // TODO: better encoding
+                                body: text, // TODO: better encoding
                                 headers: {{
                                     "Content-Type": "application/json"
                                 }}
@@ -396,7 +394,7 @@ class HTMLVisualizer:
 
         # build html elements
         reload = self.reload("/edit_{}_{}".format(underscore_fn, version))
-        subtitle = "<h3> edit: <i>{}</i> at <i>v{}</i></h3>".format(file_name, version)
+        subtitle = "<h3 id='version_subtitle'> edit: <i>{}</i> at <i>v{}</i></h3>".format(file_name, version)
 
         # create editor
         code_area = "<textarea id='code_area' rows=35 cols=80>"
@@ -411,11 +409,21 @@ class HTMLVisualizer:
         emergency_btn += "add_as_emergency_update"
         emergency_btn += "</a>"
 
+        return_link = "<a href='get_file_{}' class='padding_link'>".format(underscore_fn)
+        return_link += "&lt_cancel"
+        return_link += "</a>"
+
+        padding = (
+            "<div id='pad'></div>"  # adding distance between return link and title
+        )
+
         elements = [
             self.title,
             self.menu,
             reload,
             subtitle,
+            return_link,
+            padding,
             code_area,
             "<br>",
             send_btn,
