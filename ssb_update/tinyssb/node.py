@@ -338,10 +338,17 @@ class Node:
 
         if cmd.startswith("/get_file_version"):
             file_name = cmd[len("/get_file_version_"):]
-            page = self.html.get_file(file_name, version=True)
+            # extract version number
+            split = file_name.split("_")
+            version = int(split[-1])
+            file_name = "_".join(split[:-2]) + "." + split[-2]
+
+            page = self.html.get_file(file_name, version)
 
         elif cmd.startswith("/get_file"):
             file_name = cmd[len("/get_file_"):]
+            split = file_name.split("_")
+            file_name = "_".join(split[:-1]) + "." + split[-1]
             page = self.html.get_file(file_name)
 
         if cmd == "/create_new_file":
@@ -355,9 +362,10 @@ class Node:
 
             # create new file
             self.version_manager.create_new_file(file_name)
+            self.save_config()
 
             # serve page
-            page = self.html.get_new_file()
+            page = self.html.get_file_browser()
 
         if cmd.startswith("/apply"):
             cmd = cmd[len("/apply_"):]  # cut off prefix
@@ -403,9 +411,12 @@ class Node:
         file_name = "_".join(split[:-2])+ "." + split[-2]
 
         # json -> string
+        print(request)
         code = repr(request[1:-1])[1:-1]  # cut off "" and ''
+        print(code)
         code = code.replace("\\\\n", "\n")
         code = code.replace("\\\\t", "\t")
+        print(code)
 
         # add update
         if emergency:

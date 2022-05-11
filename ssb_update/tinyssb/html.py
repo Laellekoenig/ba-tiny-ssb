@@ -1,18 +1,23 @@
 import sys
 from .feed_manager import FeedManager
+from .ssb_util import to_hex
 from .version_manager import VersionManager
 from .version_util import apply_changes, jump_versions, string_version_graph, read_file
-from .ssb_util import to_hex
 
 
 # non-micropython import
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
-    from typing import List
+    from typing import List, Optional
 
 
 class HTMLVisualizer:
+    """
+    Class for creating HTML strings.
+    GUI of tinyssb.
+    """
 
+    # style sheet
     style = """body {padding: 2rem;
                      margin: 0;}
                p {font-family: monospace;}
@@ -40,7 +45,9 @@ class HTMLVisualizer:
                 #code_area {min-width: 50%;}
                 .ital {font-stlye: italic;}
                 #version_subtitle {margin-bottom: 0;}
-                #pad {height: 1rem;}}"""
+                #pad {height: 1rem;}
+                #current_version {text-decoration: underline black;
+                                  font-weight: bold;}}"""
 
     title = """<h1>tinyssb</h1>"""
 
@@ -53,22 +60,11 @@ class HTMLVisualizer:
               </div>
     """
 
+    # refresh page link: link can be customized
     reload = lambda _, x: "<a href='{}' id='reload'> reload </a>".format(x)
 
-    wrap_html = lambda self, x: """ <!DOCTYPE html>
-                                    <html>
-                                        <head>
-                                        </head>
-
-                                        <style>
-                                            {}
-                                        </style>
-
-                                            {}
-                                    </html>
-                                """.format(
-        self.style, x
-    )
+    # wraps the given string in between script tags
+    wrap_script = lambda _, x: "<script>\n" + x + "\n</script>"
 
     def __init__(
         self,
@@ -80,54 +76,99 @@ class HTMLVisualizer:
         self.feed_manager = feed_manager
         self.version_manager = version_manager
 
-    def body_builder(self, elements: List[str]) -> str:
-        opening_tag = "<body>"
-        closing_tag = "</body>"
-        return "\n".join([opening_tag] + elements + [closing_tag])
+    def wrap_html(self, body: str) -> str:
+        """
+        Creates a full html page from a given body (html) string.
+        Adds the style sheet from above.
+        """
+        html = """<!DOCTYPE html>
+                  <html>
+                    <head>
+                    </head>
+
+                    <style>
+                      {}
+                    </style>
+                    {}
+                  </html>""".format(
+            self.style, body
+        )
+        return html
+
+    def bob_the_page_builder(
+        self, elements: List[str], script: Optional[str] = None
+    ) -> str:
+        """
+        Takes a list of html elements (as strings) and creates a full html page.
+        Adds the style sheet from above.
+        """
+        body = "\n".join(["<body>"] + elements + ["</body>"])
+        if script:
+            body = script + "\n" + body
+        return self.wrap_html(body)
 
     def get_main_menu(self) -> str:
-        html = """  <body>
-                        {}
-                        {}
-                        {}
-                        <h3> feed_status </h3>
-                        <p>
-                            <pre>{}</pre>
-                        </p>
-                    </body>
+        """
+        Returns the default menu as a html string.
+        """
+        html = """<body>
+                    {}
+                    {}
+                    {}
+                    <h3> feed_status </h3>
+                      <p>
+                        <pre>{}</pre>
+                      </p>
+                  </body>
         """.format(
             self.title, self.reload("."), self.menu, str(self.feed_manager)
         )
-
         return self.wrap_html(html)
 
     def get_version_status(self) -> str:
-        assert self.version_manager.vc_feed is not None
+        """
+        Returns the version_status page of the gui.
+        Displays all monitored file names and their update fids.
+        The version graphs are also displayed.
+        """
+        assert (
+            self.version_manager.vc_feed is not None
+        )  # can't construct graphs without
+
         graphs = []
         for file_name in self.version_manager.vc_dict:
+            # get corresponding update feed
             fid, _ = self.version_manager.vc_dict[file_name]
             feed = self.feed_manager.get_feed(fid)
-
             if feed is None:
                 continue
 
-            apply = self.version_manager.vc_feed.get_newest_apply(fid)
+            # get newest apply version number
+            newest_apply = self.version_manager.vc_feed.get_newest_apply(fid)
+            # construct graph
+            str_graph = string_version_graph(feed, self.feed_manager, newest_apply)
+
+            # construct additional html elements
+            # link to file
             split = file_name.split(".")
             file_link = "get_file_{}_{}".format(split[0], split[1])
-            graph_title = "<a href='{}'>{}</a>: {}\n".format(
-                file_link, file_name, to_hex(fid)
-            )
-            graphs.append(
-                graph_title
-                + string_version_graph(feed, self.feed_manager, apply)
-                + "\n"
-            )
 
+            # graph title
+            graph_title = "<a href='{}'>".format(file_link)
+            graph_title += file_name
+            graph_title += "</a>: {}\n".format(to_hex(fid))
+
+            # add to list
+            graphs.append(graph_title + str_graph + "\n")
+
+        # connect all graphs in one string
         html_graph = ""
         for graph in graphs:
             html_graph += "<p> <pre class='graph'>{}</pre> <p>".format(graph)
 
         subtitle = "<h3> version_status </h3>"
+
+        # construct page
         elements = [
             self.title,
             self.reload("/version_status"),
@@ -135,87 +176,114 @@ class HTMLVisualizer:
             subtitle,
             html_graph,
         ]
-        return self.wrap_html(self.body_builder(elements))
+        return self.bob_the_page_builder(elements)
 
     def get_file_browser(self) -> str:
+        """
+        Returns the file selector as a html string.
+        Displays all monitored files and links to their pages.
+        """
+        # construct file selector
         file_lst = "<ul>\n"
         for file_name in self.version_manager.vc_dict:
             link = "get_file_" + file_name.replace(".", "_")
             file_lst += "<li> <a href='{}'> {} </a> </li>\n".format(link, file_name)
         file_lst += "</ul>"
 
-        html = """  <body>
-                        {}
-                        {}
-                        {}
-                        <h3> file_browser </h3>
-                        <a href='create_new_file'> create_new_file </a>
-                        {}
-                    </body>""".format(
-            self.title, self.reload("/file_browser"), self.menu, file_lst
-        )
-        return self.wrap_html(html)
+        # additional gui elements
+        subtitle = "<h3> file_browser </h3>"
+        create_file_link = "<a href='create_new_file'> create_new_file </a>"
 
-    def get_file(self, file_name: str, version: bool = False) -> str:
-        assert self.version_manager.vc_feed is not None
-        if version:
-            # extract and remove version numberget_file_version()
-            v = file_name.split("_")[-1]
-            cut_index = len(file_name) - len(v) - 1  # - 1 for removed "_"
-            file_name = file_name[:cut_index]
+        elements = [
+            self.title,
+            self.reload("/file_browser"),
+            self.menu,
+            subtitle,
+            create_file_link,
+            file_lst,
+        ]
+        return self.bob_the_page_builder(elements)
 
-        dot_index = file_name.rfind("_")
-        dot_file_name = file_name[:dot_index] + "." + file_name[dot_index + 1 :]
-        content = read_file(self.version_manager.path, dot_file_name)
+    def get_file(self, file_name: str, version_num: int = -1) -> str:
+        """
+        Returns the html file displaying the content of the given file.
+        If the version number == -1, the currently applied version is displayed.
+        Otherwise, the correct version is shown.
+        """
+        assert (
+            self.version_manager.vc_feed is not None
+        )  # needed to get correct versions
 
-        fid = self.version_manager.vc_dict[dot_file_name][0]
+        underscore_fn = file_name.replace(".", "_")  # used in links
+
+        # get corresponding feed and newest apply
+        fid = self.version_manager.vc_dict[file_name][0]
         feed = self.feed_manager.get_feed(fid)
-        assert feed is not None
+        assert feed is not None, "failed to get feed"
+
+        # check if the version number was specified
+        newest_apply = self.version_manager.vc_feed.get_newest_apply(fid)
+        if version_num == -1:
+            version_num = newest_apply
+        version_title = "v{}".format(version_num)
+
+        # read contents of file
+        content = read_file(self.version_manager.path, file_name)
+        assert content is not None
+        # change to correct version if necessary
+        if version_num != newest_apply:
+            changes = jump_versions(newest_apply, version_num, feed, self.feed_manager)
+            content = apply_changes(content, changes)
+        # make it html proof
+        content = content.replace("<", "&lt")
+        # create line numbers
+        line_nums = "<br>".join([str(x) for x in range(1, content.count("\n") + 2)])
+        # html display
+        code_container = """<div id="code_container">
+                              <p id='line_nums'> {} <p>
+                              <p> <pre id='code'>{}</pre> </p>
+                            </div>""".format(
+            line_nums, content
+        )
+
+        # get list of all version numbers -> find max version
         max_v = feed.get_current_version_num()
-        if max_v is None:
-            max_v = 0
+        max_v = 0 if max_v is None else max_v
+        # construct html element
         version_nums = [
-            "<a href='{}' class='v_num'> v{} </a>".format(
-                "get_file_version_{}_{}".format(file_name, v), v
+            "<a href='{}' class='v_num'>v{}</a>".format(
+                "get_file_version_{}_{}".format(underscore_fn, v), v
             )
             for v in range(max_v + 1)
+            if v != version_num  # do not add link for current version
         ]
+        current_version = "<a class='v_num' id='current_version'>"
+        current_version += "v{}".format(version_num)
+        current_version += "</a>"
+        version_nums.insert(version_num, current_version)  # insert at correct position
         version_nums = "\n".join(["<div>"] + version_nums + ["</div>"])
 
-        # version titles
-        current_apply = self.version_manager.vc_feed.get_newest_apply(fid)
-        if version:
-            version_title = "v" + v
+        # create apply links (only for updates that are not applied)
+        if version_num != newest_apply:
+            link = "apply_{}_{}".format(underscore_fn, version_num)
+            apply_link = "<a href='{}'> apply_version </a>".format(link)
         else:
-            v = current_apply
-            version_title = "v{}".format(current_apply)
+            apply_link = "<a></a>"
 
-        # change file if necessary
-        if version and content is not None:
-            changes = jump_versions(current_apply, int(v), feed, self.feed_manager)
-            content = apply_changes(content, changes)
+        # link to editing page
+        link = "edit_{}_{}".format(underscore_fn, version_num)
+        edit_link = "<a href='{}' class='padding_link'> edit </a>".format(link)
 
-        line_nums = None
-        if content is not None:
-            content = content.replace("<", "&lt")
-            line_nums = "<br>".join([str(x) for x in range(1, content.count("\n") + 2)])
-
-        if version and int(v) != current_apply:
-            apply_link = "<a href='apply_{}_{}'> apply_version </a>".format(
-                file_name, v
-            )
-        else:
-            apply_link = "<a> </a>"
-
-        edit_link = "<a href='{}' class='padding_link'> edit </a>".format("/edit_{}_{}".format(file_name, v))
+        # link back to version_status page
         return_link = "<a href='version_status'> &lt_back </a>"
 
-        subtitle = "<h3 id='version_subtitle'> {}: {} </h3>".format(dot_file_name, version_title)
-        code_container = """<div id="code_container">
-                                <p id='line_nums'> {}<p>
-                                <p> <pre id='code'>{}</pre> </p>
-                            </div>""".format(line_nums, content)
-        padding = "<div id='pad'></div>"
+        subtitle = "<h3 id='version_subtitle'> {} </h3>".format(
+            file_name
+        )
+        padding = (
+            "<div id='pad'></div>"  # adding distance between return link and title
+        )
+
         elements = [
             self.title,
             self.reload("/get_file_{}".format(file_name)),
@@ -228,45 +296,53 @@ class HTMLVisualizer:
             apply_link,
             code_container,
         ]
-
-        return self.wrap_html(self.body_builder(elements))
+        return self.bob_the_page_builder(elements)
 
     def get_create_new_file(self) -> str:
-        html = """  <script>
-                        function snd() {{
-                            input = document.getElementById('input').value;
-                            input = input.replace('.', '_');
+        """
+        Page that allows user to create a new file and add it to version control.
+        """
+        script = """function create_file() {
+                        input = document.getElementById('input').value;
 
-                            // check if input is valid
-                            if (input.includes(" ") ||
-                                input === "" ||
-                                input.split(".").length > 1) {{
-                                alert("invalid_file_name");
-                                return;
-                            }}
+                        // check if input is valid
+                        if (input.includes(" ") ||
+                            input === "" ||
+                            input.split(".").length > 2) {
 
-                            window.open("/new_file_" + input, "_self");
-                        }}
-                    </script>
-                    <body>
-                        {}
-                        {}
-                        {}
-                        <h3> create_new_file </h3>
-                        <label> new_file_name: </label>
-                        <input type="text" id='input'> </input>
-                        <br>
-                        <button onclick=snd()> create_file </button>
-                    </body>""".format(
-            self.title, self.reload("/create_new_file"), self.menu
-        )
-        return self.wrap_html(html)
+                            alert("invalid_file_name");
+                            return;
+                        }
 
-    def get_new_file(self) -> str:
-        html = """<script> window.location.href = 'file_browser' </script>"""
-        return self.wrap_html(html)
+                        input = input.replace('.', '_');
+                        window.open("/new_file_" + input, "_self");
+                    }"""
+        script = self.wrap_script(script)
 
+        # html elements
+        title = "<h3> create_new_file </h3>"
+        label = "<label> new_file_name: </label>"
+        input_field = "<input type='text' id='input'> </input>"
+        btn = "<button onclick=create_file()> create_file </button>"
+
+        elements = [
+            self.title,
+            self.reload("create_new_file"),
+            self.menu,
+            title,
+            label,
+            input_field,
+            "<br>",
+            btn,
+        ]
+        return self.bob_the_page_builder(elements, script=script)
+
+    # TODO: js better string encoding -> \n
     def get_edit_file(self, file_name: str, version: int) -> str:
+        """
+        Returns the file editor for the selected file name and version.
+        Allows the user to send updates to network (normal and emergency.)
+        """
         assert self.version_manager.vc_feed is not None
 
         fid = self.version_manager.vc_dict[file_name][0]
@@ -282,47 +358,75 @@ class HTMLVisualizer:
             changes = jump_versions(newest_apply, version, feed, self.feed_manager)
             code = apply_changes(code, changes)
 
-        script = """<script>
-                        async function send(emergency) {{
-                            text = document.getElementById('code_area').value;
+        underscore_fn = file_name.replace(".", "_")  # used in links
 
-                            if (emergency) {{
-                                cmd = "/emergency_update";
-                            }} else {{
-                                cmd = "/update";
-                            }}
+        script = """// bool emergency: determines how update is sent
+                    async function send(emergency) {{
+                        text = document.getElementById('code_area').value;
 
-                            cmd += "_{}_{}";
-
-                            try {{
-                                const response = await fetch(cmd, {{
-                                    method: "POST",
-                                    body: JSON.stringify(text),
-                                    headers: {{
-                                        "Content-Type": "application/json"
-                                    }}
-                                }});
-                                if (response.ok) {{
-                                    window.open("/version_status", "_self");
-                                    return;
-                                }}
-                            }}
-
-                            catch(err) {{
-                                alert("update_failed")
-                            }}
+                        if (emergency) {{
+                            // emergency update
+                            cmd = "/emergency_update";
+                        }} else {{
+                            cmd = "/update";
                         }}
-                    </script>""".format(file_name.replace(".", "_"), version)
 
-        reload = self.reload("/edit_{}_{}".format(file_name.replace(".", "_"), version))
+                        cmd += "_{}_{}"; // file name and version number
+
+                        try {{
+                            const response = await fetch(cmd, {{
+                                method: "POST",
+                                body: JSON.stringify(text), // TODO: better encoding
+                                headers: {{
+                                    "Content-Type": "application/json"
+                                }}
+                            }});
+
+                            if (response.ok) {{
+                                window.open("/version_status", "_self");
+                                return;
+                            }}
+                        }} catch(err) {{
+                            alert("update_failed")
+                        }}
+                    }}""".format(
+            underscore_fn, version
+        )
+        script = self.wrap_script(script)
+
+        # build html elements
+        reload = self.reload("/edit_{}_{}".format(underscore_fn, version))
         subtitle = "<h3> edit: <i>{}</i> at <i>v{}</i></h3>".format(file_name, version)
-        code_area = "<textarea id='code_area' rows=35 cols=80>{}</textarea>".format(code)
-        send_btn = "<a href='#' onclick='send(false)' class='padding_link'> add_update </a>"
-        emergency_btn = "<a href='#' onclick='send(true)' class='padding_link'> add_as_emergency_update </a>"
-        elements = [self.title, self.menu, reload, subtitle, code_area, "<br>", send_btn, emergency_btn]
-        return self.wrap_html(script + self.body_builder(elements))
+
+        # create editor
+        code_area = "<textarea id='code_area' rows=35 cols=80>"
+        code_area += code
+        code_area += "</textarea>"
+
+        send_btn = "<a href='#' onclick='send(false)' class='padding_link'>"
+        send_btn += "add_update"
+        send_btn += "</a>"
+
+        emergency_btn = "<a href='#' onclick='send(true)' class='padding_link'>"
+        emergency_btn += "add_as_emergency_update"
+        emergency_btn += "</a>"
+
+        elements = [
+            self.title,
+            self.menu,
+            reload,
+            subtitle,
+            code_area,
+            "<br>",
+            send_btn,
+            emergency_btn,
+        ]
+        return self.bob_the_page_builder(elements, script=script)
 
     def get_404(self) -> str:
+        """
+        Contains the default 'page not found' page as a html string.
+        """
         subtitle = "<h3> page_not_found </h3>"
         elements = [self.title, self.reload("."), self.menu, subtitle]
-        return self.wrap_html(self.body_builder(elements))
+        return self.bob_the_page_builder(elements)
