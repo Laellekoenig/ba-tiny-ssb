@@ -1,8 +1,8 @@
-import socket
 import _thread
+import json
+import socket
 import sys
 from .html import HTMLVisualizer
-import json
 
 
 # non-micropython import
@@ -11,20 +11,30 @@ if sys.implementation.name != "micropython":
     from typing import List
 
 
+# for sending html pages
 to_response = lambda x: "HTTP/1.0 200 OK\n\n{}".format(x).encode()
 
 
 class HTTPServer:
-
+    """
+    Used for managing a HTTP server that serves the tinyssb web gui.
+    Allows users to interact with system.
+    """
     def __init__(self, html: HTMLVisualizer) -> None:
         self.html = html
 
     def run(self, sock: socket.socket) -> None:
+        """
+        Starts an infinite loop, accepting and handling incoming connections.
+        """
         while True:
             client_sock, _ = sock.accept()
             _thread.start_new_thread(self._handle_http, (client_sock,))
 
     def _handle_http(self, client_sock: socket.socket) -> None:
+        """
+        Handles POST and GET http requests.
+        """
         assert self.html is not None, "no HTMLVisualizer initialized"
         msg = client_sock.recv(4096)
 
@@ -49,79 +59,80 @@ class HTTPServer:
             client_sock.close()
 
     def _handle_post(self, client_sock: socket.socket, request: List[str]) -> None:
+        """
+        Handles POST http requests. Executes the given function and sends
+        feedback to client. Closes the connection in the end.
+        A 404 page is server in case of an unknown command.
+        """
         cmd = request[0].split(" ")[1]
 
-        if cmd == "/new_file":
-            file_name = json.loads(request[-1])["file_name"]
-            self.html.version_manager.create_new_file(file_name)
-            page = self.html.get_file(file_name, -1)
-            client_sock.sendall(to_response(page))
-            client_sock.close()
-            return
-
-        if cmd == "/file":
+        if cmd in ["/new_file", "/file", "/apply", "/edit"]:
             json_dict = json.loads(request[-1])
             file_name = json_dict["file_name"]
+
+
+            if cmd == "/new_file":
+                self.html.version_manager.create_new_file(file_name)
+                page = self.html.get_file(file_name, -1)
+                client_sock.sendall(to_response(page))
+                client_sock.close()
+                return
+
             version = json_dict["version"]
-            page = self.html.get_file(file_name, version)
+            page = None
+
+            if cmd == "/file":
+                page = self.html.get_file(file_name, version)
+
+            if cmd == "/apply":
+                self.html.version_manager.add_apply(file_name, version)
+                # send updated file view
+                page = self.html.get_file(file_name, -1)
+
+            if cmd == "/edit":
+                page = self.html.get_edit_file(file_name, version)
+
+            assert page is not None
             client_sock.sendall(to_response(page))
             client_sock.close()
             return
 
-        if cmd == "/apply":
-            json_dict = json.loads(request[-1])
-            file_name = json_dict["file_name"]
-            version = json_dict["version"]
-            self.html.version_manager.add_apply(file_name, version)
-            # send updated file view
-            page = self.html.get_file(file_name, -1)
-            client_sock.sendall(to_response(page))
-            client_sock.close()
-            return
+        emergency = cmd.startswith("/emergency_update")
+        update = cmd.startswith("/update")
+        if emergency or update:
+            # separate command
+            cmd = cmd[len("/emergency_update_"):] if emergency else cmd[len("/update_"):]
 
-        if cmd == "/edit":
-            json_dict = json.loads(request[-1])
-            file_name = json_dict["file_name"]
-            version = json_dict["version"]
-            page = self.html.get_edit_file(file_name, version)
-            client_sock.sendall(to_response(page))
-            client_sock.close()
-            return
-
-        # must be update
-
-        if cmd.startswith("/emergency_update"):
-            cmd = cmd[len("/emergency_update_"):]  # cut off cmd
-            split = cmd.split("_")
-            version = int(split[-1])
-            file_name = "_".join(split[:-1])
-
-            code = "\n".join(request[15:])
-            self.html.version_manager.emergency_update_file(file_name, code, version)
-            page = self.html.get_file(file_name, -1)
-            client_sock.sendall(to_response(page))
-            client_sock.close()
-            return
-
-        if cmd.startswith("/update"):
-            cmd = cmd[len("/update_"):]  # cut off cmd
+            # get update info
             split = cmd.split("_")
             version = int(split[-1])
             file_name = "_".join(split[:-1])
             code = "\n".join(request[15:])
-            self.html.version_manager.update_file(file_name, code, version)
-            page = self.html.get_file(file_name, version)
+
+            if emergency:
+                self.html.version_manager.emergency_update_file(file_name, code, version)
+            else:
+                self.html.version_manager.update_file(file_name, code, version)
+
+            page = self.html.get_file(file_name, -1)
             client_sock.sendall(to_response(page))
             client_sock.close()
             return
+
+        # default error message
+        client_sock.send(to_response(self.html.get_404()))
+        client_sock.close()
 
     def _hanlde_get(self, client_sock: socket.socket, request: List[str]) -> None:
+        """
+        Handles http GET requests. Fetches the requested page and sends it to client.
+        If the page is not found, a 404 page is sent.
+        """
         # extract command
         cmd = request[0].split(" ")[1]
 
+        # handle depending on requested page
         page = None
-
-        # handle depending on cmd
         if cmd == "/":
             page = self.html.get_index()
 
@@ -134,49 +145,12 @@ class HTTPServer:
         if cmd == "/file_browser":
             page = self.html.get_file_browser()
 
-        # if cmd.startswith("/get_file_version"):
-            # file_name = cmd[len("/get_file_version_"):]
-            # extract version number
-            # split = file_name.split("_")
-            # version = int(split[-1])
-            # file_name = "_".join(split[:-2]) + "." + split[-2]
-
-            # page = self.html.get_file(file_name, version)
-
-        # elif cmd.startswith("/get_file"):
-            # file_name = cmd[len("/get_file_"):]
-            # split = file_name.split("_")
-            # file_name = "_".join(split[:-1]) + "." + split[-1]
-            # page = self.html.get_file(file_name)
-
         if cmd == "/create_new_file":
             page = self.html.get_create_new_file()
-
-        # if cmd.startswith("/apply"):
-            # cmd = cmd[len("/apply_"):]  # cut off prefix
-
-            # get version number and file name
-            # split = cmd.split("_")
-            # v = int(split[-1])
-            # file_name = "_".join(split[:-2]) + "." + split[-2]
-
-            # apply update
-            # self.html.version_manager.add_apply(file_name, v)
-
-            # serve page
-            # page = self.html.get_version_status()
-
-        # if cmd.startswith("/edit"):
-            # cmd = cmd[len("/edit_"):]
-            # split = cmd.split("_")
-            # v = int(split[-1])
-            # file_name = "_".join(split[:-2]) + "." + split[-2]
-            # page = self.html.get_edit_file(file_name, v)
 
         if page is None:
             page = self.html.get_404()
 
         # send requested content
-        to_response = lambda x: "HTTP/1.0 200 OK\n\n{}".format(x).encode()
         client_sock.sendall(to_response(page))
         client_sock.close()

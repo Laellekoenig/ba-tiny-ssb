@@ -1,6 +1,7 @@
 import _thread
 import os
 import sys
+import json
 from .feed import Feed
 from .packet import (
     PacketType,
@@ -32,9 +33,11 @@ class FeedManager:
     If no dictionary is provided, an empty one is created.
     """
 
-    def __init__(self, path: str = "", keys: Dict[str, str] = {}):
+    def __init__(self, path: str = ""):
         self.path = path
-        self.keys = keys
+        # load keys from config
+        self.keys = {}
+        self._load_config()
         self.feed_dir = self.path + "/" + "_feeds"
         self.blob_dir = self.path + "/" + "_blobs"
         self._check_dirs()
@@ -47,6 +50,24 @@ class FeedManager:
 
         # callback functions
         self._callback = {}
+
+    def save_config(self) -> None:
+        string = json.dumps(self.keys)
+        
+        f = open(self.path + "/config.json", "w")
+        f.write(string)
+        f.close()
+
+    def _load_config(self) -> None:
+        if "config.json" not in os.listdir(self.path):
+            self.keys = {}
+            return
+
+        f = open(self.path + "/config.json", "r")
+        jsn = f.read()
+        f.close()
+
+        self.keys = json.loads(jsn)
 
     def __str__(self) -> str:
         """
@@ -325,6 +346,9 @@ class FeedManager:
         self.dmx_table[want] = (self.handle_want, feed.fid)
         self.dmx_table[next_dmx] = (self.handle_packet, feed.fid)
         self.dmx_lock.release()
+
+        # save config -> new key
+        self.save_config()
 
         # add to dmx
         return feed

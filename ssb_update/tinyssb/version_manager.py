@@ -1,6 +1,5 @@
 import json
 import os
-from socket import create_server
 import sys
 from .feed import Feed
 from .feed_manager import FeedManager
@@ -388,7 +387,6 @@ class VersionManager:
 
         if file_name not in self.vc_dict:
             print("file does not exist")
-            # TODO: create new file
             return None
 
         # get feed

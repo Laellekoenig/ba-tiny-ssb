@@ -1,4 +1,3 @@
-from os import scandir
 import sys
 from .feed_manager import FeedManager
 from .ssb_util import to_hex
@@ -23,6 +22,9 @@ class HTMLVisualizer:
                      margin: 0;}
                p {font-family: monospace;}
                a {font-family: monospace;}
+               #title {cursor: pointer;
+                       text-decoration: underline;
+                       margin-top: -1rem;}
                #menu {display: flex;
                       flex-direction: row;}
                .menu_item {margin-right: 1rem;}
@@ -68,7 +70,7 @@ class HTMLVisualizer:
                               margin-left: -.5rem;
                               text-decoration: underline;}}"""
 
-    title = """<h1>tinyssb</h1>"""
+    title = """<h1 onclick='javascript:window.open("/", "_self");' id='title'>tinyssb</h1>"""
 
     menu = """<div id='menu'>
                 <a href='feed_status' class='menu_item'> feed_status </a>
@@ -100,21 +102,18 @@ class HTMLVisualizer:
                         document.write(html);
                         document.close();
                     },
-                    function(err) {alert("failed_to_get_file"); return;}
+                    function(err) {alert('failed_to_get_file'); return;}
                 );
 
                 return;
             } catch (err) {
-                alert("failed_to_get_file");
+                alert('failed_to_get_file');
             }
         }
         </script>"""
 
     # refresh page link: link can be customized
     reload = lambda _, x: "<a href='{}' id='reload'> reload </a>".format(x)
-
-    # wraps the given string in between script tags
-    wrap_script = lambda _, x: "<script>\n" + x + "\n</script>"
 
     def __init__(
         self,
@@ -209,7 +208,6 @@ class HTMLVisualizer:
             str_graph = string_version_graph(feed, self.feed_manager, newest_apply)
 
             # construct additional html elements
-
             # graph title
             graph_title = (
                 "<a href='javascript:void(0);' onclick='getFile(\"{}\", -1)'>".format(
@@ -247,8 +245,12 @@ class HTMLVisualizer:
         # construct file selector
         file_lst = "<ul>\n"
         for file_name in self.version_manager.vc_dict:
-            # link = "get_file_" + file_name.replace(".", "_")
-            file_lst += "<li> <a href='javascript:void(0);' onclick='getFile(\"{}\", -1)'> {} </a> </li>\n".format(
+            file_lst += """<li>
+                             <a href='javascript:void(0);'
+                                onclick='getFile(\"{}\", -1)'>
+                               {}
+                             </a>
+                            </li>""".format(
                 file_name, file_name
             )
         file_lst += "</ul>"
@@ -293,18 +295,18 @@ class HTMLVisualizer:
 
                 response.text().then(
                     function(html) {
-                        alert("applied_update");
+                        alert('applied_update');
                         document.open();
                         document.write(html);
                         document.close();
                         return;
                     },
                     function(err) {
-                        alert("failed_to_apply_update");
+                        alert('failed_to_apply_update');
                     }
                 );
             } catch (err) {
-                alert("failed_to_apply_update");
+                alert('failed_to_apply_update');
             }
         }
 
@@ -329,17 +331,17 @@ class HTMLVisualizer:
                         document.close();
                     },
                     
-                    function(err) {alert("failed_to_get_file_editor"); return;}
+                    function(err) {
+                        alert('failed_to_get_file_editor');
+                        return;
+                    }
                 );
 
-                return;
             } catch(err) {
-                alert("failed_to_get_file_editor");
+                alert('failed_to_get_file_editor');
             }
         }
         </script>"""
-
-        underscore_fn = file_name.replace(".", "_")  # used in links
 
         # get corresponding feed and newest apply
         fid = self.version_manager.vc_dict[file_name][0]
@@ -375,9 +377,13 @@ class HTMLVisualizer:
         max_v = 0 if max_v is None else max_v
         # construct html element
         version_nums = [
-            "<a href='javascript:void(0);' onclick='getFile(\"{}\", {})' class='v_num'>v{}</a>".format(
-                file_name, v, v
-            )
+            """<a href='javascript:void(0);'
+                  onclick='getFile(\"{}\", {})'
+                  class='v_num'>
+                 v{}
+               </a>""".format(
+                   file_name, v, v
+               )
             for v in range(max_v + 1)
             if v != version_num  # do not add link for current version
         ]
@@ -389,18 +395,23 @@ class HTMLVisualizer:
 
         # create apply links (only for updates that are not applied)
         if version_num != newest_apply:
-            # link = "apply_{}_{}".format(underscore_fn, version_num)
-            apply_link = "<a href='javascript:void(0);' onclick='applyUpdate(\"{}\", {})'> apply_version </a>".format(
-                file_name, version_num
-            )
+            apply_link = """<a href='javascript:void(0);'
+                               onclick='applyUpdate(\"{}\", {})'>
+                              apply_version
+                            </a>""".format(
+                                file_name, version_num
+                            )
         else:
             apply_link = "<a></a>"
 
         # link to editing page
-        # link = "edit_{}_{}".format(underscore_fn, version_num)
-        edit_link = "<a href='javascript:void(0);' onclick='editFile(\"{}\", {})' class='padding_link'> edit </a>".format(
-            file_name, version_num
-        )
+        edit_link = """<a href='javascript:void(0);'
+                          onclick='editFile(\"{}\", {})'
+                          class='padding_link'>
+                         edit
+                       </a>""".format(
+                           file_name, version_num
+                       )
 
         # link back to version_status page
         return_link = "<a href='javascript:location.reload();'> &lt_back </a>"
@@ -423,55 +434,55 @@ class HTMLVisualizer:
             apply_link,
             code_container,
         ]
-        return self.bob_the_page_builder(elements)
+        return self.bob_the_page_builder(elements, script=self.get_file_script)
 
     def get_create_new_file(self) -> str:
         """
         Page that allows user to create a new file and add it to version control.
         """
-        script = """async function create_file() {
-                        input = document.getElementById('input').value;
+        script = """<script>
+        async function create_file() {
+            input = document.getElementById('input').value;
 
-                        // check if input is valid
-                        if (input.includes(" ") ||
-                            input === "" ||
-                            input.split(".").length > 2) {
+            // check if input is valid
+            if (input.includes(" ") ||
+                input === "" ||
+                input.split(".").length > 2) {
 
-                            alert("invalid_file_name");
-                            return;
-                        }
+                alert("invalid_file_name");
+                return;
+            }
 
-                        // send as POST
-                        try {
-                            const response = await fetch("/new_file", {
-                                method: "POST",
-                                body: JSON.stringify({
-                                    'file_name': input,
-                                }),
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                }
-                            });
+            try {
+                const response = await fetch("/new_file", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        'file_name': input,
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
 
-                            response.text().then(
-                                function(html) {
-                                    document.open();
-                                    document.write(html);
-                                    document.close();
-                                    return;
-                                },
+                response.text().then(
+                    function(html) {
+                        document.open();
+                        document.write(html);
+                        document.close();
+                        return;
+                    },
 
-                                function(err) {
-                                    alert("create_file_failed");
-                                }
+                    function(err) {
+                        alert('create_file_failed');
+                    }
 
-                            );
+                );
 
-                        } catch (err) {
-                            alert("create_file_failed");
-                        }
-                    }"""
-        script = self.wrap_script(script)
+            } catch (err) {
+                alert('create_file_failed');
+            }
+        }
+        </script>"""
 
         # html elements
         title = "<h3 id='version_subtitle'> create_new_file </h3>"
@@ -526,19 +537,19 @@ class HTMLVisualizer:
 
             if (emergency) {{
                 // emergency update
-                cmd = "/emergency_update";
+                cmd = '/emergency_update';
             }} else {{
-                cmd = "/update";
+                cmd = '/update';
             }}
 
-            cmd += "_{}_{}"; // file name and version number
+            cmd += '_{}_{}'; // file name and version number
 
             try {{
                 const response = await fetch(cmd, {{
-                    method: "POST",
+                    method: 'POST',
                     body: text,
                     headers: {{
-                        "Content-Type": "application/json"
+                        'Content-Type': 'application/json'
                     }}
                 }});
 
@@ -547,18 +558,16 @@ class HTMLVisualizer:
                         document.open();
                         document.write(html);
                         document.close();
-                        alert("added_update");
+                        alert('added_update');
                         return;
                     }},
                     function(err) {{
-                        alert("update_failed");
+                        alert('update_failed');
                     }}
                 );
 
-                return;
-
             }} catch(err) {{
-                alert("update_failed")
+                alert('update_failed')
             }}
         }}
         </script>""".format(
@@ -566,14 +575,14 @@ class HTMLVisualizer:
         )
 
         script2 = """<script>
-        document.getElementById("code_area").addEventListener("keydown", function(e) {
-            if (e.key == "Tab") {
+        document.getElementById('code_area').addEventListener('keydown', function(e) {
+            if (e.key == 'Tab') {
                 e.preventDefault();
                 const start = this.selectionStart;
                 const end = this.selectionEnd;
 
                 this.value = this.value.substring(0, start)
-                    + "    "
+                    + '   ' 
                     + this.value.substring(end);
                 this.selectionStart = start + 4;
                 this.selectionEnd = start + 4;
@@ -616,7 +625,6 @@ class HTMLVisualizer:
         )
 
         elements = [
-            script,
             self.title,
             self.menu,
             reload,
@@ -629,7 +637,7 @@ class HTMLVisualizer:
             emergency_btn,
             script2,
         ]
-        return self.bob_the_page_builder(elements)
+        return self.bob_the_page_builder(elements, script=script)
 
     def get_404(self) -> str:
         """

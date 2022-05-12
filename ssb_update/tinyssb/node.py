@@ -77,7 +77,6 @@ class Node:
         Writes the current master FID and FID-key-pairs into a json file.
         """
         config = {}
-        config["keys"] = self.feed_manager.keys
         config["master_fid"] = self.master_fid
 
         f = open(self.path + "/" + self.cfg_file_name, "w")
@@ -105,14 +104,11 @@ class Node:
             config = json.loads(json_string)
 
         if config is None:
-            keys = {}
             master_fid = None
         else:
-            keys = config["keys"]
             master_fid = config["master_fid"]
 
         # load keys into feed manager
-        self.feed_manager.update_keys(keys)
         self.master_fid = master_fid
 
         # start version control
