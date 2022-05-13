@@ -58,10 +58,8 @@ def init() -> None:
     for path in paths + [master_path]:
         # copy code files
         code_path = "update_code"
-        shutil.rmtree(path + "/code")
-        shutil.copytree(code_path, path + "/code")
-        # for f in os.listdir(code_path):
-            # shutil.copy(code_path + "/" + f, path + "/code")
+        for f in os.listdir(code_path):
+            shutil.copy(code_path + "/" + f, path + "/code")
 
     for path in paths:
         shutil.copy(meta_path, path + "/_feeds")

@@ -4,7 +4,7 @@ import sys
 from .feed import Feed
 from .feed_manager import FeedManager
 from .packet import PacketType
-from .ssb_util import to_hex, create_keypair, from_hex
+from .ssb_util import mk_dir, to_hex, create_keypair, from_hex, walk
 from .version_util import (
     apply_changes,
     changes_to_bytes,
@@ -124,7 +124,8 @@ class VersionManager:
         self.may_update = True
 
         # check monitored files
-        files = os.listdir(self.path)
+        # files = os.listdir(self.path)
+        files = walk(self.path)
         for f in files:
             if f not in self.vc_dict and f != self.cfg_file_name and not f[0] == ".":
                 # create new update feed for file
@@ -266,7 +267,16 @@ class VersionManager:
             file_name = feed.get_upd_file_name()
             assert file_name is not None
             # create file if it does not exist
-            if file_name not in os.listdir(self.path):
+            if file_name not in walk(self.path):
+                print("creating new file")
+                # create directories if necessary
+                if "/" in file_name:
+                    file_name = file_name[1:] if file_name.startswith("/") else file_name
+                    file_name = file_name[:-1] if file_name.endswith("/") else file_name
+                    split = file_name.split("/")
+                    dirs = "/".join(split[:-1])
+                    file_name = split[-1]
+                    mk_dir(self.path + "/" + dirs)
                 write_file(self.path, file_name, "")
 
     def _emergency_feed_callback(self, fid: bytes) -> None:
@@ -386,7 +396,7 @@ class VersionManager:
             return
 
         if file_name not in self.vc_dict:
-            print("file does not exist")
+            # print("file does not exist")
             return None
 
         # get feed
@@ -543,11 +553,27 @@ class VersionManager:
         assert self.update_feed is not None
         print("creating new file: {}".format(file_name))
 
-        if file_name in os.listdir(self.path):
+        if file_name in walk(self.path):
             print("file already exists")
             return
 
-        write_file(self.path, file_name, "")
+        path = self.path
+        if "/" in file_name:
+            og = file_name
+            file_name = file_name[1:] if file_name.startswith("/") else file_name
+            file_name = file_name[:-1] if file_name.endswith("/") else file_name
+
+            split = file_name.split("/")
+            path += "/" + "/".join(split[:-1])
+
+            # create directories
+            mk_dir(path)
+
+            file_name = split[-1]
+            write_file(path, file_name, "")
+            file_name = og
+        else:
+            write_file(path, file_name, "")
 
         # create new feed
         skey, vkey = create_keypair()

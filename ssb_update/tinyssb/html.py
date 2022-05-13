@@ -330,7 +330,7 @@ class HTMLVisualizer:
                         document.write(html);
                         document.close();
                     },
-                    
+
                     function(err) {
                         alert('failed_to_get_file_editor');
                         return;
@@ -382,8 +382,8 @@ class HTMLVisualizer:
                   class='v_num'>
                  v{}
                </a>""".format(
-                   file_name, v, v
-               )
+                file_name, v, v
+            )
             for v in range(max_v + 1)
             if v != version_num  # do not add link for current version
         ]
@@ -399,8 +399,8 @@ class HTMLVisualizer:
                                onclick='applyUpdate(\"{}\", {})'>
                               apply_version
                             </a>""".format(
-                                file_name, version_num
-                            )
+                file_name, version_num
+            )
         else:
             apply_link = "<a></a>"
 
@@ -410,8 +410,8 @@ class HTMLVisualizer:
                           class='padding_link'>
                          edit
                        </a>""".format(
-                           file_name, version_num
-                       )
+            file_name, version_num
+        )
 
         # link back to version_status page
         return_link = "<a href='javascript:location.reload();'> &lt_back </a>"
@@ -451,6 +451,11 @@ class HTMLVisualizer:
 
                 alert("invalid_file_name");
                 return;
+            }
+
+            // cut off starting /
+            if (input.startsWith("/")) {
+                input = input.slice(1);
             }
 
             try {

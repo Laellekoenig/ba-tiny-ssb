@@ -9,7 +9,7 @@ if sys.implementation.name == "micropython":
 else:
     # regular python
     import binascii as bin
-    from typing import Tuple
+    from typing import Tuple, List, Optional
 
 
 def is_file(file_name: str) -> bool:
@@ -28,6 +28,81 @@ def is_file(file_name: str) -> bool:
         return file_name in os.listdir()
     else:
         return file_name in os.listdir(dir_prefix)
+
+
+def is_dir(path: str) -> bool:
+    """
+    Returns True if the given path is a directory
+    and False if the given path is a file.
+    """
+    try:
+        f = open(path, "r")
+        f.close()
+        return False
+    except Exception:
+        return True
+
+
+def dir_exists(path: str) -> bool:
+    """
+    Returns True if there exists a directory with the given path
+    """
+    path = path[1:] if path.startswith("/") else path
+    path = path[:-1] if path.endswith("/") else path
+    dir_path = None
+
+    if "/" in path:
+        split = path.split("/")
+        dir_path = "/".join(split[:-1])
+        path = split[-1]
+
+    return path in os.listdir(dir_path)
+
+
+def walk(path: Optional[str] = None) -> List[str]:
+    """
+    Own (micropython compatible) implementation of os.walk
+    Returns a list of all files contained within the given directory,
+    including all subdirectories.
+    """
+    if path:
+        path = path[1:] if path.startswith("/") else path
+        path = path[:-1] if path.endswith("/") else path
+
+    is_file = lambda x: not is_dir(x)  # helper lambda
+    listdir = os.listdir(path)
+    listdir = [fn if path is None else path + "/" + fn for fn in listdir]
+
+    dirs = list(filter(is_dir, listdir))
+    files = list(filter(is_file, listdir))
+
+    while dirs:
+        current_dir = dirs.pop()
+        listdir = [current_dir + "/" + p for p in os.listdir(current_dir)]
+
+        dirs += list(filter(is_dir, listdir))
+        files += list(filter(is_file, listdir))
+
+    # remove path again
+    if path is not None:
+        files = [fn[len(path) + 1 :] for fn in files]  # +1 for the added parenthesis
+
+    return files
+
+
+def mk_dir(path: str) -> None:
+    """
+    Creates all of the directories, contained in the given path.
+    """
+    path = path[1:] if path.startswith("/") else path
+
+    dirs = path.split("/")
+    current_dir = ""
+    for d in dirs:
+        current_dir += d + "/"
+        if dir_exists(current_dir):
+            continue
+        os.mkdir(current_dir)
 
 
 def to_hex(b: bytes) -> str:

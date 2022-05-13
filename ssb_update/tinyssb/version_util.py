@@ -1,7 +1,7 @@
 import sys
 from .feed import Feed
 from .feed_manager import FeedManager
-from .ssb_util import to_var_int, from_var_int
+from .ssb_util import to_var_int, from_var_int, walk
 from collections import deque
 from typing import Callable, Optional
 
@@ -141,6 +141,10 @@ def read_file(path: str, file_name: str) -> Optional[str]:
     Reads the content of a given path + file name and returns it as a string.
     If the file is not found or cannot be read, None is returned.
     """
+    path = path[1:] if path.startswith("/") else path
+    path = path[:-1] if path.endswith("/") else path
+    file_name = file_name[1:] if file_name.startswith("/") else file_name
+
     content = None
     try:
         f = open(path + "/" + file_name, "r")
