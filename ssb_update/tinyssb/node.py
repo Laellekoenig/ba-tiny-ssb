@@ -38,7 +38,8 @@ class Node:
         self._create_dirs()
         # create feed and version managers
         self.feed_manager = FeedManager(self.path)
-        self.version_manager = VersionManager(self.path + "/code", self.feed_manager)
+        # self.version_manager = VersionManager(self.path + "/code", self.feed_manager)
+        self.version_manager = VersionManager(self.path, self.feed_manager)
         self.master_fid = None
         # load configuration
         self._load_config()
@@ -63,14 +64,14 @@ class Node:
         structure:
         data | node_a | _blobs
                       | _feeds
-                      | code
+                      | code files
         """
         if self.parent_dir not in os.listdir():
             os.mkdir(self.parent_dir)
         if self.name not in os.listdir(self.parent_dir):
             os.mkdir(self.path)
-        if "code" not in os.listdir(self.path):
-            os.mkdir(self.path + "/code")
+        # if "code" not in os.listdir(self.path):
+            # os.mkdir(self.path + "/code")
 
     def save_config(self) -> None:
         """
@@ -268,7 +269,7 @@ class Node:
 
             if inpt in ["t", "tree"]:
                 assert self.version_manager.vc_feed is not None
-                file_name = "test.txt"
+                file_name = "lib/test.txt"
                 file_fid, _ = self.version_manager.vc_dict[file_name]
                 file_feed = self.feed_manager.get_feed(file_fid)
                 assert file_feed is not None, "failed to get feed"

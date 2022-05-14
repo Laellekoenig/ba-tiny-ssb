@@ -3,6 +3,7 @@ import pure25519
 import shutil
 import sys
 from tinyssb.node import Node
+from tinyssb.ssb_util import is_dir
 from typing import Tuple
 
 
@@ -58,8 +59,14 @@ def init() -> None:
     for path in paths + [master_path]:
         # copy code files
         code_path = "update_code"
-        shutil.rmtree(path + "/code")
-        shutil.copytree(code_path, path + "/code")
+        # shutil.rmtree(path + "/code")
+        # shutil.copytree(code_path, path + "/code")
+        # shutil.copy(code_path, path)
+        for f in os.listdir(code_path):
+            if is_dir(code_path + "/" + f):
+                shutil.copytree(code_path + "/" + f, path + "/" + f)
+            else:
+                shutil.copy(code_path + "/" + f, path)
         # for f in os.listdir(code_path):
             # shutil.copy(code_path + "/" + f, path + "/code")
 

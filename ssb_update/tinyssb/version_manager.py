@@ -127,7 +127,13 @@ class VersionManager:
         # files = os.listdir(self.path)
         files = walk(self.path)
         for f in files:
-            if f not in self.vc_dict and f != self.cfg_file_name and not f[0] == ".":
+            if (
+                f not in self.vc_dict
+                and f != self.cfg_file_name
+                and not f[0] == "."
+                and not f.endswith(".log")
+                and not f.endswith(".json")
+            ):
                 # create new update feed for file
                 skey, vkey = create_keypair()
                 new = self.feed_manager.create_child_feed(self.update_feed, vkey, skey)
@@ -256,6 +262,7 @@ class VersionManager:
 
             # add to version control dict
             self.vc_dict[file_name] = (feed.fid, emergency_fid)
+            print("file name: {}".format(file_name))
 
             # add current apply info if it does not exists
             if file_name not in self.apply_dict:
@@ -271,12 +278,15 @@ class VersionManager:
                 print("creating new file")
                 # create directories if necessary
                 if "/" in file_name:
-                    file_name = file_name[1:] if file_name.startswith("/") else file_name
+                    file_name = (
+                        file_name[1:] if file_name.startswith("/") else file_name
+                    )
                     file_name = file_name[:-1] if file_name.endswith("/") else file_name
                     split = file_name.split("/")
                     dirs = "/".join(split[:-1])
                     file_name = split[-1]
                     mk_dir(self.path + "/" + dirs)
+                    file_name = dirs + "/" + file_name
                 write_file(self.path, file_name, "")
 
     def _emergency_feed_callback(self, fid: bytes) -> None:
