@@ -34,8 +34,7 @@ class VersionManager:
 
     cfg_file_name = "update_cfg.json"
 
-    def __init__(self, path: str, feed_manager: FeedManager) -> None:
-        self.path = path
+    def __init__(self, feed_manager: FeedManager) -> None:
         self.feed_manager = feed_manager
 
         self.vc_dict = {}  # key: file name, value: (update_fid, emergency_fid)
@@ -64,7 +63,7 @@ class VersionManager:
 
         # save as json dump
         json_str = json.dumps(dictionary)
-        write_file(self.path, self.cfg_file_name, json_str)
+        write_file(self.cfg_file_name, json_str)
 
     def _load_config(self) -> None:
         """
@@ -73,14 +72,14 @@ class VersionManager:
         The file name of a monitored file is the key and a tuple consisting
         of the corresponding file update FID and emergency FID is is the associated value.
         """
-        if self.cfg_file_name not in os.listdir(self.path):
+        if self.cfg_file_name not in os.listdir():
             # no config found -> empty dictionaries
             self.vc_dict = {}
             self.apply_queue = {}
             self.apply_dict = {}
         else:
             # file exists, load json
-            json_str = read_file(self.path, self.cfg_file_name)
+            json_str = read_file(self.cfg_file_name)
             assert json_str is not None
             str_dict = json.loads(json_str)
 
@@ -126,14 +125,11 @@ class VersionManager:
 
         # check monitored files
         # files = os.listdir(self.path)
-        files = walk(self.path)
+        files = walk()
         for f in files:
             if (
                 f not in self.vc_dict
-                and f != self.cfg_file_name
-                and not f[0] == "."
-                and not f.endswith(".log")
-                and not f.endswith(".json")
+                and f.endswith(".py")
             ):
                 # create new update feed for file
                 skey, vkey = create_keypair()
@@ -275,7 +271,7 @@ class VersionManager:
             file_name = feed.get_upd_file_name()
             assert file_name is not None
             # create file if it does not exist
-            if file_name not in walk(self.path):
+            if file_name not in walk():
                 print("creating new file")
 
                 # create directories if necessary
@@ -286,11 +282,11 @@ class VersionManager:
                     dirs = "/".join(split[:-1])  # directory path
                     file_name = split[-1]
 
-                    mk_dir(self.path + "/" + dirs)  # create directories
+                    mk_dir(dirs)  # create directories
                     file_name = dirs + "/" + file_name  # reconstruct original filename
 
                 # create empty file
-                write_file(self.path, file_name, "")
+                write_file(file_name, "")
 
     def _emergency_feed_callback(self, fid: bytes) -> None:
         """
@@ -376,7 +372,7 @@ class VersionManager:
         # get content from current file
         file_name = file_feed.get_upd_file_name()
         assert file_name is not None
-        file = read_file(self.path, file_name)
+        file = read_file(file_name)
         assert file is not None, "failed to read file"
 
         current_apply = self.apply_dict[file_name]
@@ -388,7 +384,7 @@ class VersionManager:
         file = apply_changes(file, changes)
 
         # save updated file
-        write_file(self.path, file_name, file)
+        write_file(file_name, file)
         if fid in self.apply_queue:
             del self.apply_queue[fid]
         self.apply_dict[file_name] = seq
@@ -418,7 +414,7 @@ class VersionManager:
         assert feed is not None, "failed to get feed"
 
         # get currently applied version and version number
-        current_file = read_file(self.path, file_name)
+        current_file = read_file(file_name)
         assert current_file is not None, "failed to read file"
         # current_apply = self.vc_feed.get_newest_apply(fid)
         current_apply = self.apply_dict[file_name]
@@ -486,7 +482,7 @@ class VersionManager:
             return None
 
         # get current file and apply
-        current_file = read_file(self.path, file_name)
+        current_file = read_file(file_name)
         assert current_file is not None, "failed to read file"
         current_apply = self.apply_dict[file_name]
 
@@ -515,7 +511,7 @@ class VersionManager:
 
         # apply changes locally
         updated_file = apply_changes(current_file, update_changes)
-        write_file(self.path, file_name, updated_file)
+        write_file(file_name, updated_file)
 
         # update information in version control feed
         self.vc_dict[file_name] = (emergency_feed.fid, new_emergency.fid)
@@ -566,11 +562,11 @@ class VersionManager:
         assert self.update_feed is not None
         print("creating new file: {}".format(file_name))
 
-        if file_name in walk(self.path):
+        if file_name in walk():
             print("file already exists")
             return
 
-        path = self.path
+        path = ""
         if "/" in file_name:
             original_fn = file_name  # save for later
             file_name = trim_file_name(file_name)
@@ -580,12 +576,12 @@ class VersionManager:
             # create directories and file
             mk_dir(path)
             file_name = split[-1]
-            write_file(path, file_name, "")
+            write_file(file_name, "")
 
             file_name = original_fn  # restore original file name
 
         else:
-            write_file(path, file_name, "")
+            write_file(file_name, "")
 
         # create new feed
         skey, vkey = create_keypair()

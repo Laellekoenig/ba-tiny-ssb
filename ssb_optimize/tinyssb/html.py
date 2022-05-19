@@ -354,7 +354,7 @@ class HTMLVisualizer:
             version_num = newest_apply
 
         # read contents of file
-        content = read_file(self.version_manager.path, file_name)
+        content = read_file(file_name)
         assert content is not None
         # change to correct version if necessary
         if version_num != newest_apply:
@@ -525,7 +525,7 @@ class HTMLVisualizer:
         assert feed is not None
 
         newest_apply = self.version_manager.vc_feed.get_newest_apply(fid)
-        code = read_file(self.version_manager.path, file_name)
+        code = read_file(file_name)
         assert code is not None
 
         if newest_apply != version:

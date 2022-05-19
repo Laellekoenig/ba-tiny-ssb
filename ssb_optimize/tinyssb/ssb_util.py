@@ -1,4 +1,3 @@
-import os
 import pure25519
 import sys
 
@@ -12,18 +11,16 @@ else:
     from typing import Tuple, List, Optional
 
 
-def read_file(path: str, file_name: str) -> Optional[str]:
+def read_file(file_name: str) -> Optional[str]:
     """
     Reads the content of a given path + file name and returns it as a string.
     If the file is not found or cannot be read, None is returned.
     """
-    path = path[1:] if path.startswith("/") else path
-    path = path[:-1] if path.endswith("/") else path
     file_name = file_name[1:] if file_name.startswith("/") else file_name
 
     content = None
     try:
-        f = open(path + "/" + file_name, "r")
+        f = open(file_name, "r")
         content = f.read()
         f.close()
     except Exception:
@@ -32,7 +29,7 @@ def read_file(path: str, file_name: str) -> Optional[str]:
     return content
 
 
-def write_file(path: str, file_name: str, content: str) -> bool:
+def write_file(file_name: str, content: str) -> bool:
     """
     Overwrites the content of a given file with the given content.
     Returns True on success.
@@ -42,7 +39,7 @@ def write_file(path: str, file_name: str, content: str) -> bool:
     print("\n".join([msg, separator]))
 
     try:
-        f = open(path + "/" + file_name, "w")
+        f = open(file_name, "w")
         f.write(content)
         f.close()
         return True

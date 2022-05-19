@@ -8,6 +8,9 @@ from .ssb_util import to_var_int, from_var_int
 if sys.implementation.name != "micropython":
     # Optional type annotations are ignored in micropython
     from typing import List, Tuple, Dict, Callable, Optional
+    from collections import deque
+else:
+    from ucollections import deque
 
 
 def _takewhile(predicate: Callable[[List[int]], bool], lst: List[int]) -> List[int]:
@@ -349,10 +352,11 @@ def _bfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
 
     # label start as visited
     visited = [True if i == start else False for i in range(max_v + 1)]
-    queue = [[start]]
+    # queue = [[start]]
+    queue = deque([[start]], max_v)
 
     while queue:
-        path = queue.pop(0)
+        path = queue.popleft()
         current = path[-1]
 
         # check if path was found
