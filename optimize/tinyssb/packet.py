@@ -330,9 +330,7 @@ def create_chain(
 
     # start with last blob
     back = len(blob_content)
-    front = back - 100
-
-    print(back, front)
+    front = max(back - 100, 0)
 
     ptr = bytes(20)  # last pointer is null pointer
     while front >= 0:

@@ -1,6 +1,16 @@
-from _typeshed import Incomplete
 import gc
-from uctypes import UINT8, ARRAY, struct, addressof, BIG_ENDIAN, UINT32
+from sys import implementation
+from uos import ilistdir, mkdir
+from uctypes import (
+    UINT8,
+    ARRAY,
+    struct,
+    addressof,
+    BIG_ENDIAN,
+    UINT32,
+    sizeof,
+    bytearray_at,
+)
 from ubinascii import hexlify
 from .packet import (
     PLAIN48,
@@ -12,8 +22,17 @@ from .packet import (
     UPDFILE,
     APPLYUP,
     WIRE_PACKET,
+    create_chain,
     from_var_int,
+    PACKET,
+    new_packet,
+    pkt_from_wire,
 )
+
+
+# helps debugging in vim
+if implementation.name != "micropython":
+    from typing import Optional, List
 
 
 FEED = {
@@ -29,17 +48,54 @@ FEED = {
 
 
 # basic feed functions
-#-------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 
-get_file_name = lambda fid: "{}.log".format(hexlify(fid).decode())
+get_log_fn = lambda fid: "_feeds/{}.log".format(hexlify(fid).decode())
+get_header_fn = lambda fid: "_feeds/{}.head".format(hexlify(fid).decode())
+
+
+# this has to be changed for pycom
+def listdir(path: Optional[str]) -> List[str]:
+    if path is None:
+        return [name for name, _, _ in list(ilistdir())]
+    else:
+        return [name for name, _, _ in list(ilistdir(path))]
+
+
+def create_feed(
+    fid: bytearray,
+    trusted_seq: int = 0,
+    trusted_mid: Optional[bytearray] = None,
+    parent_seq: int = 0,
+    parent_fid: bytearray = bytearray(32),
+) -> struct[FEED]:
+    if trusted_mid is None:
+        trusted_mid = fid[:20]  # tinyssb convention
+
+    assert len(fid) == 32
+    assert len(trusted_mid) == 20
+    assert len(parent_fid) == 32
+
+    # create header
+    feed = struct(addressof(bytearray(sizeof(FEED))), FEED, BIG_ENDIAN)
+    feed.fid[:] = fid
+    feed.parent_fid[:] = parent_fid
+    feed.parent_seq = parent_seq
+    feed.anchor_seq = trusted_seq
+    feed.anchor_mid[:] = trusted_mid
+    feed.front_seq = trusted_seq
+    feed.front_mid[:] = fid[:20]  # tinyssb convention
+
+    save_header(feed)
+    return feed
 
 
 def get_feed(fid: bytearray) -> struct[FEED]:
     # reserve memory for header
     feed_header = bytearray(128)
     # read file
-    f = open(get_file_name(fid), "rb")
+    f = open(get_header_fn(fid), "rb")
     feed_header[:] = f.read(128)
     f.close()
 
@@ -62,8 +118,8 @@ def get_wire(feed: struct[FEED], i: int) -> bytearray:
     relative_i = i - anchor_seq
     del anchor_seq
     wire_array = bytearray(128)
-    f = open(get_file_name(feed.fid), "rb")
-    f.seek(128 * relative_i)
+    f = open(get_log_fn(feed.fid), "rb")
+    f.seek(128 * (relative_i - 1))  # -1 because header is in separate file
     wire_array[:] = f.read(128)
     f.close()
 
@@ -74,6 +130,7 @@ def get_payload(feed: struct[FEED], i: int) -> bytearray:
     wire_array = get_wire(feed, i)
     gc.collect()
 
+    # maybe direct array access instead?
     wpkt = struct(addressof(wire_array), WIRE_PACKET, BIG_ENDIAN)
     if wpkt.type != CHAIN20.to_bytes(1, "big"):
         return wpkt.payload
@@ -81,11 +138,13 @@ def get_payload(feed: struct[FEED], i: int) -> bytearray:
     # unwrap chain
     # get length
     content_size, num_bytes = from_var_int(wpkt.payload)
+    if content_size <= 27:
+        return wpkt.payload[1 : 1 + content_size]
     content_array = bytearray(content_size)
     current_i = 28 - num_bytes
     content_array[:current_i] = wpkt.payload[num_bytes:-20]
 
-    ptr = wpkt.ptr
+    ptr = wpkt.payload[-20:]
     del wpkt
 
     null_ptr = bytearray(20)
@@ -97,18 +156,120 @@ def get_payload(feed: struct[FEED], i: int) -> bytearray:
         blob_array[:] = f.read(128)
         f.close()
         del file_name
+        ptr = blob_array[108:]
 
         # fill in and get next pointer
-        content_array[current_i:current_i + 100] = blob_array[8:108]
-        current_i += 100
-        ptr = blob_array[108:]
+        if ptr == null_ptr:
+            content_array[current_i:] = blob_array[8 : content_size - current_i + 8]
+        else:
+            content_array[current_i : current_i + 100] = blob_array[8:108]
+            current_i += 100
         del blob_array
 
     return content_array
 
 
+def save_header(feed: struct[FEED]) -> None:
+    f = open(get_header_fn(feed.fid), "wb")
+    f.write(bytearray_at(addressof(feed), sizeof(FEED)))
+    f.close()
+
+
+def append_packet(feed: struct[FEED], pkt: struct[PACKET]) -> None:
+    # TODO: check if feed has ended?
+    f = open(get_log_fn(feed.fid), "ab")
+    f.seek(0, 2)  # move to end of file
+    f.write(bytearray_at(addressof(pkt.wire[0]), sizeof(WIRE_PACKET)))
+    f.close()
+
+    # update header
+    feed.front_mid[:] = pkt.mid
+    del pkt
+    feed.front_seq += 1
+    save_header(feed)
+
+
+def append_bytes(feed: struct[FEED], payload: bytearray, key: bytearray) -> None:
+    payload_len = len(payload)
+    assert payload_len <= 48
+
+    if payload_len < 48:
+        # pad content to 48B
+        padded_payload = bytearray(48)
+        padded_payload[:payload_len] = payload
+        del payload
+        payload = padded_payload
+        del padded_payload
+
+    pkt_type = PLAIN48.to_bytes(1, "big")
+    seq = (feed.front_seq + 1).to_bytes(4, "big")
+    pkt = new_packet(
+        feed.fid,
+        seq,
+        feed.front_mid,
+        payload,
+        pkt_type,
+        key,
+    )
+    append_packet(feed, pkt)
+
+
+def append_blob(feed: struct[FEED], payload: bytearray, key: bytearray) -> None:
+    pkt, blobs = create_chain(
+        feed.fid, feed.front_seq.to_bytes(4, "big"), feed.front_mid, payload, key
+    )
+
+    ptr = hexlify(pkt.wire[0].payload[-20:]).decode()
+    # save blob files
+    for blob in blobs:
+        dir_name = ptr[:2]
+        file_name = ptr[2:]
+        del ptr
+
+        if dir_name not in listdir("_blobs"):
+            mkdir("_blobs/{}".format(dir_name))
+
+        # write blob
+        f = open("_blobs/{}/{}".format(dir_name, file_name), "wb")
+        f.write(bytearray_at(addressof(blob), sizeof(blob)))
+        f.close()
+
+        # get next ptr
+        ptr = hexlify(blob.pointer).decode()
+
+    del blobs
+    assert ptr == "0000000000000000000000000000000000000000"
+    # append packet to feed
+    append_packet(feed, pkt)
+
+
+def verify_and_append_bytes(feed: struct[FEED], wpkt: bytearray) -> None:
+    pkt = pkt_from_wire(
+        feed.fid, feed.front_seq.to_bytes(4, "big"), feed.front_mid, wpkt
+    )
+
+    if pkt is None:
+        print("verification of packet failed")
+        return
+
+    append_packet(feed, pkt)
+
+
+def get_parent(feed: struct[FEED]) -> Optional[bytearray]:
+    if feed.anchor_seq != 0 or feed.front_mid < 1:
+        return None
+    wire = get_wire(feed, 1)
+
+    # check type
+    if wire[15:16] != ISCHILD.to_bytes(1, "big"):
+        return None
+
+    # return parent fid
+    return wire[16:48]
+
+
 # less relevant functions
-#-------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 
 def to_string(feed: struct[FEED]) -> str:
@@ -118,27 +279,27 @@ def to_string(feed: struct[FEED]) -> str:
     length = front_seq - anchor_seq
     separator = "".join([("+-----" * (length + 1)), "+"])
     numbers = "   {}  ".format(anchor_seq)
-    feed = "| HDR |"
+    feed_str = "| HDR |"
 
     for i in range(anchor_seq + 1, front_seq + 1):
-        "".join([numbers, "   {}  ".format(i)])
+        numbers = "".join([numbers, "   {}  ".format(i)])
         pkt_type = int.from_bytes(get_wire(feed, i)[15:16], "big")
 
         if pkt_type == PLAIN48:
-            "".join([feed, " P48 |"])
+            feed_str = "".join([feed_str, " P48 |"])
         if pkt_type == CHAIN20:
-            "".join([feed, " C20 |"])
+            feed_str = "".join([feed_str, " C20 |"])
         if pkt_type == ISCHILD:
-            "".join([feed, " ICH |"])
+            feed_str = "".join([feed_str, " ICH |"])
         if pkt_type == ISCONTN:
-            "".join([feed, " ICN |"])
+            feed_str = "".join([feed_str, " ICN |"])
         if pkt_type == MKCHILD:
-            "".join([feed, " MKC |"])
+            feed_str = "".join([feed_str, " MKC |"])
         if pkt_type == CONTDAS:
-            "".join([feed, " CTD |"])
+            feed_str = "".join([feed_str, " CTD |"])
         if pkt_type == UPDFILE:
-            "".join([feed, " UPD |"])
+            feed_str = "".join([feed_str, " UPD |"])
         if pkt_type == APPLYUP:
-            "".join([feed, " APP |"])
+            feed_str = "".join([feed_str, " APP |"])
 
-    return "\n".join([title, numbers, separator, feed, separator])
+    return "\n".join([title, numbers, separator, feed_str, separator])
