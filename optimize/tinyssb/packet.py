@@ -71,6 +71,9 @@ SESTREE = const(0x10)
 PKTFORK = const(0x11)
 
 
+PKT_PREFIX = bytearray(b"tiny-v02")
+
+
 # STRUCT definitions
 WIRE_PACKET = {
     "reserved": (0 | ARRAY, 8 | UINT8),
@@ -114,7 +117,7 @@ def new_packet(
     assert len(key) == 32
     # create wire packet
     wpkt = struct(addressof(bytearray(sizeof(WIRE_PACKET))), WIRE_PACKET, BIG_ENDIAN)
-    wpkt.reserved[:] = b"tiny-v02"
+    wpkt.reserved[:] = PKT_PREFIX
     wpkt.payload[:] = payload[:]
     wpkt.type[:] = pkt_type[:]
 
@@ -220,14 +223,14 @@ def create_parent_pkt(
 ) -> struct[PACKET]:
     pkt_type = bytearray(MKCHILD.to_bytes(1, "big"))
     payload = bytearray(48)
-    payload[:20] = child_fid[:20]
+    payload[:32] = child_fid
     return new_packet(fid, seq, prev_mid, payload, pkt_type, skey)
 
 
 def create_child_pkt(
     fid: bytearray, payload: bytearray, skey: bytearray
 ) -> struct[PACKET]:
-    seq = bytearray((1).to_bytes(1, "big"))
+    seq = bytearray((1).to_bytes(4, "big"))
     prev_mid = fid[:20]
     pkt_type = bytearray(ISCHILD.to_bytes(1, "big"))
     return new_packet(fid, seq, prev_mid, payload, pkt_type, skey)

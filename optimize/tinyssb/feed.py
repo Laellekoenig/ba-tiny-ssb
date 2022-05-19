@@ -1,6 +1,7 @@
 import gc
 from sys import implementation
 from uos import ilistdir, mkdir
+from uhashlib import sha256
 from uctypes import (
     UINT8,
     ARRAY,
@@ -22,17 +23,22 @@ from .packet import (
     UPDFILE,
     APPLYUP,
     WIRE_PACKET,
+    create_apply_pkt,
     create_chain,
+    create_child_pkt,
+    create_parent_pkt,
+    create_upd_pkt,
     from_var_int,
     PACKET,
     new_packet,
     pkt_from_wire,
+    PKT_PREFIX,
 )
 
 
 # helps debugging in vim
 if implementation.name != "micropython":
-    from typing import Optional, List
+    from typing import Optional, List, Tuple
 
 
 FEED = {
@@ -89,6 +95,45 @@ def create_feed(
 
     save_header(feed)
     return feed
+
+
+def create_child_feed(
+    parent_feed: struct[FEED],
+    parent_key: bytearray,
+    child_fid: bytearray,
+    child_key: bytearray,
+) -> struct[FEED]:
+    parent_pkt = create_parent_pkt(
+        parent_feed.fid,
+        (parent_feed.front_seq + 1).to_bytes(4, "big"),
+        parent_feed.front_mid,
+        child_fid,
+        parent_key,
+    )
+
+    child_feed = create_feed(
+        child_fid, parent_seq=parent_feed.front_seq, parent_fid=parent_feed.fid
+    )
+
+    child_payload = bytearray(48)
+    child_payload[:32] = parent_feed.fid
+    child_payload[32:36] = parent_feed.front_seq.to_bytes(4, "big")
+    child_payload[36:] = sha256(
+        bytearray_at(addressof(parent_pkt.wire[0]), sizeof(WIRE_PACKET))
+    ).digest()[:12]
+
+    child_pkt = create_child_pkt(child_fid, child_payload, child_key)
+
+    # append both
+    append_packet(child_feed, child_pkt)
+    append_packet(parent_feed, parent_pkt)
+    return child_feed
+
+
+def create_contn_feed(
+    ending_feed: struct[FEED], contn_fid: bytearray, contn_key: bytearray
+) -> struct[FEED]:
+    pass
 
 
 def get_feed(fid: bytearray) -> struct[FEED]:
@@ -266,6 +311,185 @@ def get_parent(feed: struct[FEED]) -> Optional[bytearray]:
 
     # return parent fid
     return wire[16:48]
+
+
+def get_children(feed: struct[FEED]) -> List[bytearray]:
+    # has to iterate over entire feed, avoid
+    children = []
+    mk_child = MKCHILD.to_bytes(1, "big")
+    for i in range(feed.anchor_seq + 1, feed.front_seq + 1):
+        wpkt = get_wire(feed, i)
+        if wpkt[15:16] == mk_child:
+            children.append(wpkt[16:48])
+
+    return children
+
+
+def get_contn(feed: struct[FEED]) -> Optional[bytearray]:
+    if feed.front_seq < 1:
+        return None
+
+    wpkt = get_wire(feed, -1)
+    if wpkt[15:16] == CONTDAS.to_bytes(1, "big"):
+        return wpkt[16:48]
+
+    return None
+
+
+def get_prev(feed: struct[FEED]) -> Optional[bytearray]:
+    if feed.anchor_seq != 0:
+        return None
+
+    wpkt = get_wire(feed, 1)
+    if wpkt[15:16] == ISCONTN.to_bytes(1, "big"):
+        return wpkt[16:48]
+
+    return None
+
+
+def get_next_dmx(feed: struct[FEED]) -> bytearray:
+    dmx = bytearray(64)
+    dmx[:8] = PKT_PREFIX
+    dmx[8:40] = feed.fid
+    dmx[40:44] = (feed.front_seq + 1).to_bytes(4, "big")
+    dmx[44:64] = feed.front_mid
+    return sha256(dmx).digest()[:7]
+
+
+def waiting_for_blob(feed: struct[FEED]) -> Optional[bytearray]:
+    if feed.front_seq < 1:
+        return None
+
+    # check front packet
+    wpkt = get_wire(feed, -1)
+    if wpkt[15:16] != CHAIN20.to_bytes(1, "BIG"):
+        return None
+
+    ptr = wpkt[16:36]
+    null_ptr = bytearray(20)
+    while ptr != null_ptr:
+        hex_ptr = hexlify(ptr).decode()
+        file_name = "_blobs/{}/{}".format(hex_ptr[:2], hex_ptr[2:])
+
+        # check if file exists
+        try:
+            blob = bytearray(128)
+            f = open(file_name, "rb")
+            blob[:] = f.read(128)
+            f.close()
+        except Exception:
+            # does not exist yet, return pointer
+            del blob
+            return ptr
+
+        ptr[:] = blob[-20:]
+        del blob
+
+    return None
+
+
+def verify_and_append_blob(feed: struct[FEED], blob: bytearray) -> None:
+    assert len(blob) == 128
+    # TODO: maybe skip check if already done by dmx check when receiving?
+    blob_hash = sha256(blob[8:]).digest()[:20]
+    if blob_hash != waiting_for_blob(feed):
+        # not waiting for this blob
+        return
+
+    # save blob file
+    hex_blob = hexlify(blob_hash).digest()
+    file_name = "_blobs/{}/{}".format(hex_blob[:2], hex_blob[2:])
+    f = open(file_name, "wb")
+    f.write(blob)
+    f.close()
+
+
+def get_want(feed: struct[FEED]) -> bytearray:
+    want_dmx = bytearray(7)
+    want_dmx[:] = sha256(feed.fid + b"want").digest()[:7]
+
+    # check whether blob or packet is missing
+    # TODO: this could be inefficient for long blob chains
+    blob_ptr = waiting_for_blob(feed)
+    if blob_ptr is None:
+        # packet missing
+        want = bytearray(43)
+        want[:7] = want_dmx
+        want[7:39] = feed.fid
+        want[39:] = (feed.front_seq + 1).to_bytes(4, "big")
+        return want
+    else:
+        want = bytearray(63)
+        want[:7] = want_dmx
+        want[7:39] = feed.fid
+        want[39:43] = feed.front_seq.to_bytes(4, "big")
+        want[43:] = blob_ptr
+        return want
+
+
+def add_upd_file_name(
+    feed: struct[FEED], file_name: str, key: bytearray, v_number: int = 0
+) -> None:
+    fn_array = bytearray(file_name.encode())
+    vn_array = bytearray(v_number.to_bytes(4, "big"))
+    pkt = create_upd_pkt(
+        feed.fid,
+        (feed.front_seq + 1).to_bytes(4, "big"),
+        feed.front_mid,
+        fn_array,
+        vn_array,
+        key,
+    )
+
+    append_packet(feed, pkt)
+
+
+def get_upd_file_name(feed: struct[FEED]) -> Optional[Tuple[str, int]]:
+    # assumes that the upp packet is at position 2 in the feed!
+    wpkt = get_wire(feed, 2)
+    # check type
+    if wpkt[15:16] != UPDFILE.to_bytes(1, "big"):
+        return None
+
+    # extract info
+    fn_len, n_bytes = from_var_int(wpkt[16:64])  # payload
+    offset = 16 + n_bytes
+    offset2 = offset + fn_len
+    file_name = wpkt[offset:offset2].decode()
+    del offset
+    v_num = int.from_bytes(wpkt[offset2 : offset2 + 3], "big")
+    del offset2
+
+    return file_name, v_num
+
+
+def add_apply(
+    feed: struct[FEED], file_fid: bytearray, v_num: int, key: bytearray
+) -> None:
+    vn_arr = bytearray(v_num.to_bytes(4, "big"))
+    pkt = create_apply_pkt(
+        feed.fid,
+        (feed.front_seq + 1).to_bytes(4, "big"),
+        feed.front_mid,
+        file_fid,
+        vn_arr,
+        key,
+    )
+
+    append_packet(feed, pkt)
+
+
+def get_newest_apply(feed: struct[FEED], file_fid: bytearray) -> Optional[int]:
+    # TODO: can this be improved? Naïve iterating over feed...
+    applyup = APPLYUP.to_bytes(1, "big")
+    for i in range(feed.front_seq, feed.anchor_seq, -1):
+        wpkt = get_wire(feed, i)
+        if wpkt[15:16] == applyup:
+            if wpkt[16:48] == file_fid:
+                return int.from_bytes(wpkt[48:52], "big")
+        del wpkt
+
+    return None
 
 
 # less relevant functions

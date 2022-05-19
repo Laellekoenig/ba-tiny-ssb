@@ -2,15 +2,16 @@ import os
 from ubinascii import hexlify
 from tinyssb.feed import *
 
-fid = os.urandom(32)
-print(hexlify(fid).decode())
-key = os.urandom(32)
+fid1 = os.urandom(32)
+key1 = os.urandom(32)
 
-f = create_feed(fid)
-append_bytes(f, b"hello world", key)
-print(get_payload(f, 1))
+fid2 = os.urandom(32)
+key2 = os.urandom(32)
 
-append_blob(f, b"hello" + bytes(100) + b"test" + bytes(100) + b"end12", key)
-print(get_payload(f, 2))
+f1 = create_feed(fid1)
+f2 = create_child_feed(f1, key1, fid2, key2)
 
-print(to_string(f))
+w = get_wire(f1, 1)
+print(w[16:48] == f2.fid)
+print(get_parent(f2) == f1.fid)
+print(f2.fid in get_children(f1))
