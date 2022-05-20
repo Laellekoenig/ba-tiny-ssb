@@ -1,18 +1,3 @@
-import gc
-from sys import implementation
-from uos import ilistdir, mkdir
-from uhashlib import sha256
-from uctypes import (
-    ARRAY,
-    BIG_ENDIAN,
-    UINT32,
-    UINT8,
-    addressof,
-    bytearray_at,
-    sizeof,
-    struct,
-)
-from ubinascii import hexlify
 from .packet import (
     APPLYUP,
     CHAIN20,
@@ -36,11 +21,26 @@ from .packet import (
     new_packet,
     pkt_from_wire,
 )
+from gc import collect
+from sys import implementation
+from ubinascii import hexlify
+from uctypes import (
+    ARRAY,
+    BIG_ENDIAN,
+    UINT32,
+    UINT8,
+    addressof,
+    bytearray_at,
+    sizeof,
+    struct,
+)
+from uhashlib import sha256
+from uos import ilistdir, mkdir
 
 
 # helps debugging in vim
 if implementation.name != "micropython":
-    from typing import Optional, List, Tuple
+    from typing import Optional, List, Tuple, Union
 
 
 FEED = {
@@ -64,11 +64,24 @@ get_header_fn = lambda fid: "_feeds/{}.head".format(hexlify(fid).decode())
 
 
 # this has to be changed for pycom
-def listdir(path: Optional[str]) -> List[str]:
+def listdir(path: Optional[str] = None) -> List[str]:
     if path is None:
         return [name for name, _, _ in list(ilistdir())]
     else:
         return [name for name, _, _ in list(ilistdir(path))]
+
+
+def get_feed(fid: bytearray) -> struct[FEED]:
+    # reserve memory for header
+    feed_header = bytearray(128)
+    # read file
+    f = open(get_header_fn(fid), "rb")
+    feed_header[:] = f.read(128)
+    f.close()
+
+    # create struct
+    feed = struct(addressof(feed_header), FEED, BIG_ENDIAN)
+    return feed
 
 
 def create_feed(
@@ -166,19 +179,6 @@ def create_contn_feed(
     return cont_feed
 
 
-def get_feed(fid: bytearray) -> struct[FEED]:
-    # reserve memory for header
-    feed_header = bytearray(128)
-    # read file
-    f = open(get_header_fn(fid), "rb")
-    feed_header[:] = f.read(128)
-    f.close()
-
-    # create struct
-    feed = struct(addressof(feed_header), FEED, BIG_ENDIAN)
-    return feed
-
-
 def get_wire(feed: struct[FEED], i: int) -> bytearray:
     # transform negative indices
     if i < 0:
@@ -203,7 +203,7 @@ def get_wire(feed: struct[FEED], i: int) -> bytearray:
 
 def get_payload(feed: struct[FEED], i: int) -> bytearray:
     wire_array = get_wire(feed, i)
-    gc.collect()
+    collect()
 
     # maybe direct array access instead?
     wpkt = struct(addressof(wire_array), WIRE_PACKET, BIG_ENDIAN)
@@ -343,14 +343,19 @@ def get_parent(feed: struct[FEED]) -> Optional[bytearray]:
     return wire[16:48]
 
 
-def get_children(feed: struct[FEED]) -> List[bytearray]:
+def get_children(
+    feed: struct[FEED], index: bool = False
+) -> Union[List[bytearray], List[Tuple[bytearray, int]]]:
     # has to iterate over entire feed, avoid
     children = []
     mk_child = MKCHILD.to_bytes(1, "big")
     for i in range(feed.anchor_seq + 1, feed.front_seq + 1):
         wpkt = get_wire(feed, i)
         if wpkt[15:16] == mk_child:
-            children.append(wpkt[16:48])
+            if index:
+                children.append((wpkt[16:48], i))
+            else:
+                children.append(wpkt[16:48])
 
     return children
 

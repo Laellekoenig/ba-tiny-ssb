@@ -17,6 +17,7 @@ def init() -> None:
 
     sk, vk = create_keypair()
     master = fm.create_feed(vk, sk)
+    assert master is not None
     n.set_master_fid(bytes(master.fid))
 
     sk, vk = create_keypair()
@@ -24,6 +25,7 @@ def init() -> None:
 
     sk, vk = create_keypair()
     update = fm.create_child_feed(bytes(master.fid), vk, sk)
+    assert update is not None
 
     sk, vk = create_keypair()
     fm.create_child_feed(bytes(update.fid), vk, sk)
@@ -65,5 +67,3 @@ def delete_dir(path: str) -> None:
 def run() -> None:
     n = Node("master", enable_http=True)
     n.io()
-
-run()

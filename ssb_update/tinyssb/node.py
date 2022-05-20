@@ -313,7 +313,7 @@ class Node:
             (
                 r_sock,
                 port,
-            ),
+            )
         )
         _thread.start_new_thread(self._send, (s_sock,))
         _thread.start_new_thread(self._user_input, ())

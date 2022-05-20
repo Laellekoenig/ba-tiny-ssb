@@ -1,5 +1,5 @@
-from micropython import const
 from math import ceil
+from micropython import const
 from pure25519 import VerifyingKey, SigningKey
 from sys import byteorder
 from sys import implementation
