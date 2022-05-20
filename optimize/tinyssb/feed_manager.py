@@ -1,24 +1,32 @@
 from .feed import (
+    append_bytes,
+    create_feed,
     get_children,
     get_feed,
     get_next_dmx,
     get_parent,
     get_want,
+    get_wire,
     listdir,
     to_string,
+    verify_and_append_blob,
+    verify_and_append_bytes,
     waiting_for_blob,
 )
+from .packet import CONTDAS, MKCHILD, WIRE_PACKET
 from _thread import allocate_lock
 from json import dumps, loads
 from os import mkdir
 from pure25519 import create_keypair
-from sys import implementation
-from ubinascii import unhexlify
+from sys import exc_info, implementation
+from ubinascii import unhexlify, hexlify
+from uctypes import struct, addressof, BIG_ENDIAN
+from uhashlib import sha256
 
 
 # helps debugging in vim
 if implementation.name != "micropython":
-    from typing import Dict, Tuple, List, Callable
+    from typing import Dict, Tuple, List, Callable, Optional
 
 
 class FeedManager:
@@ -56,7 +64,11 @@ class FeedManager:
 
     def _save_config(self) -> None:
         f = open("fm_config.json", "w")
-        f.write(dumps(self.keys))
+        f.write(
+            dumps(
+                {hexlify(k).decode(): hexlify(v).decode() for k, v in self.keys.items()}
+            )
+        )
         f.close()
 
     def _load_config(self) -> None:
@@ -65,10 +77,14 @@ class FeedManager:
             return
 
         f = open(file_name)
-        self.keys = loads(f.read())
+        str_dict = loads(f.read())
+        self.keys = {
+            unhexlify(k.encode()): unhexlify(v.encode())
+            for k, v in str_dict.items()
+        }
         f.close()
 
-    def update_keys(self, keys: Dict[str, str]) -> None:
+    def update_keys(self, keys: Dict[bytes, bytes]) -> None:
         self.keys = keys
         self._save_config()
 
@@ -138,16 +154,104 @@ class FeedManager:
                 else:
                     self.dmx_table[get_next_dmx(feed)] = (self.handle_packet, fid)
 
+    def get_key(self, fid: bytearray) -> Optional[bytearray]:
+        b_fid = bytes(fid)
+        with self.dmx_lock:
+            if b_fid not in self.dmx_table:
+                return None
+            return self.dmx_table[b_fid]
+
     def consult_dmx(
         self, msg: bytearray
-    ) -> Optional[Tuple[Callable[[bytearray, bytearray], None]], bytearray]:
-        pass
+    ) -> Optional[Tuple[Callable[[bytearray, bytearray], None], bytearray]]:
+        b_msg = bytes(msg)
+        with self.dmx_lock:
+            if b_msg not in self.dmx_table:
+                return None
+            return self.dmx_table[b_msg]
 
-    def handle_want(self) -> None:
-        pass
+    def handle_want(self, fid: bytearray, request: bytearray) -> Optional[bytearray]:
+        req_feed = get_feed(fid)
+        req_seq = int.from_bytes(request[39:43], "big")
+        # check seq number
+        if req_feed.front_seq < req_seq:
+            return None
 
-    def handle_packet(self) -> None:
-        pass
+        req_wire = bytearray(128)
+        if len(request) == 43:
+            # packet
+            req_wire[:] = get_wire(req_feed, req_seq)
+        else:
+            # blob
+            blob_ptr = request[-20:]
+            try:
+                f = open("_blobs/{}".format(hexlify(blob_ptr).decode()), "rb")
+                req_wire[:] = f.read(128)
+                f.close()
+            except Exception:
+                return None  # blob not found
 
-    def handle_blob(self) -> None:
-        pass
+        return req_wire
+
+    def handle_packet(self, fid: bytearray, wire: bytearray) -> None:
+        feed = get_feed(fid)
+        wpkt = struct(addressof(wire), WIRE_PACKET, BIG_ENDIAN)
+        if not verify_and_append_bytes(feed, wire):
+            return
+
+        next_dmx = get_next_dmx(feed)
+
+        blob_ptr = waiting_for_blob(feed)
+        if next_dmx == wpkt.dmx and blob_ptr is None:
+            # nothing was appended
+            return None
+
+        # update dmx value
+        with self.dmx_lock:
+            del self.dmx_table[wpkt.dmx]
+            if blob_ptr is None:
+                self.dmx_table[next_dmx] = self.handle_packet, fid
+            else:
+                self.dmx_table[blob_ptr] = self.handle_blob, fid
+                return
+
+        # check for continuation or child feed
+        front_wire = get_wire(feed, -1)
+        if front_wire[15:16] in [CONTDAS.to_bytes(1, "big"), MKCHILD.to_bytes(1, "big")]:
+            create_feed(front_wire[16:48], parent_seq=feed.front_seq, parent_fid=fid)
+
+        # callbacks
+        if fid in self._callback:
+            for function in self._callback[fid]:
+                function(fid)
+
+    def handle_blob(self, fid: bytearray, blob: bytearray) -> None:
+        feed = get_feed(fid)
+
+        if not verify_and_append_blob(feed, blob):
+            return
+
+        signature = sha256(blob[8:]).digest()[:20]
+
+        with self.dmx_lock:
+            del self.dmx_table[signature]
+
+        next_ptr = waiting_for_blob(feed)
+        if not next_ptr:
+            with self.dmx_lock:
+                self.dmx_table[get_next_dmx(feed)] = self.handle_packet, fid
+
+                if fid in self._callback:
+                    for function in self._callback[fid]:
+                        function(fid)
+
+                return
+
+        with self.dmx_lock:
+            self.dmx_table[next_ptr] = self.handle_blob, fid
+
+    def register_callback(self, fid: bytearray, function) -> None:
+        if fid not in self._callback:
+            self._callback[fid] = [function]
+        else:
+            self._callback[fid] = (self._callback[fid]).append(function)

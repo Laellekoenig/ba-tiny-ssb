@@ -318,16 +318,17 @@ def append_blob(feed: struct[FEED], payload: bytearray, key: bytearray) -> None:
     append_packet(feed, pkt)
 
 
-def verify_and_append_bytes(feed: struct[FEED], wpkt: bytearray) -> None:
+def verify_and_append_bytes(feed: struct[FEED], wpkt: bytearray) -> bool:
     pkt = pkt_from_wire(
         feed.fid, feed.front_seq.to_bytes(4, "big"), feed.front_mid, wpkt
     )
 
     if pkt is None:
         print("verification of packet failed")
-        return
+        return False
 
     append_packet(feed, pkt)
+    return True
 
 
 def get_parent(feed: struct[FEED]) -> Optional[bytearray]:
@@ -423,13 +424,13 @@ def waiting_for_blob(feed: struct[FEED]) -> Optional[bytearray]:
     return None
 
 
-def verify_and_append_blob(feed: struct[FEED], blob: bytearray) -> None:
+def verify_and_append_blob(feed: struct[FEED], blob: bytearray) -> bool:
     assert len(blob) == 128
     # TODO: maybe skip check if already done by dmx check when receiving?
     blob_hash = sha256(blob[8:]).digest()[:20]
     if blob_hash != waiting_for_blob(feed):
         # not waiting for this blob
-        return
+        return False
 
     # save blob file
     hex_blob = hexlify(blob_hash).digest()
@@ -437,6 +438,7 @@ def verify_and_append_blob(feed: struct[FEED], blob: bytearray) -> None:
     f = open(file_name, "wb")
     f.write(blob)
     f.close()
+    return True
 
 
 def get_want(feed: struct[FEED]) -> bytearray:
