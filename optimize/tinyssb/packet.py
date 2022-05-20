@@ -244,7 +244,7 @@ def create_end_pkt(
     skey: bytearray,
 ) -> struct[PACKET]:
     payload = bytearray(48)
-    payload[:20] = contn_fid[:20]
+    payload[:32] = contn_fid
     pkt_type = bytearray(CONTDAS.to_bytes(1, "big"))
     return new_packet(fid, seq, prev_mid, payload, pkt_type, skey)
 
@@ -252,7 +252,7 @@ def create_end_pkt(
 def create_contn_pkt(
     fid: bytearray, payload: bytearray, skey: bytearray
 ) -> struct[PACKET]:
-    seq = bytearray((1).to_bytes(1, "big"))
+    seq = bytearray((1).to_bytes(4, "big"))
     prev_mid = fid[:20]
     pkt_type = bytearray(ISCONTN.to_bytes(1, "big"))
     return new_packet(fid, seq, prev_mid, payload, pkt_type, skey)

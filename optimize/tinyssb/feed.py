@@ -3,36 +3,38 @@ from sys import implementation
 from uos import ilistdir, mkdir
 from uhashlib import sha256
 from uctypes import (
-    UINT8,
     ARRAY,
-    struct,
-    addressof,
     BIG_ENDIAN,
     UINT32,
-    sizeof,
+    UINT8,
+    addressof,
     bytearray_at,
+    sizeof,
+    struct,
 )
 from ubinascii import hexlify
 from .packet import (
-    PLAIN48,
+    APPLYUP,
     CHAIN20,
+    CONTDAS,
     ISCHILD,
     ISCONTN,
     MKCHILD,
-    CONTDAS,
+    PACKET,
+    PKT_PREFIX,
+    PLAIN48,
     UPDFILE,
-    APPLYUP,
     WIRE_PACKET,
     create_apply_pkt,
     create_chain,
     create_child_pkt,
+    create_contn_pkt,
+    create_end_pkt,
     create_parent_pkt,
     create_upd_pkt,
     from_var_int,
-    PACKET,
     new_packet,
     pkt_from_wire,
-    PKT_PREFIX,
 )
 
 
@@ -103,21 +105,22 @@ def create_child_feed(
     child_fid: bytearray,
     child_key: bytearray,
 ) -> struct[FEED]:
+    parent_seq = (parent_feed.front_seq + 1).to_bytes(4, "big")
     parent_pkt = create_parent_pkt(
         parent_feed.fid,
-        (parent_feed.front_seq + 1).to_bytes(4, "big"),
+        parent_seq,
         parent_feed.front_mid,
         child_fid,
         parent_key,
     )
 
     child_feed = create_feed(
-        child_fid, parent_seq=parent_feed.front_seq, parent_fid=parent_feed.fid
+        child_fid, parent_seq=parent_feed.front_seq + 1, parent_fid=parent_feed.fid
     )
 
     child_payload = bytearray(48)
     child_payload[:32] = parent_feed.fid
-    child_payload[32:36] = parent_feed.front_seq.to_bytes(4, "big")
+    child_payload[32:36] = parent_seq
     child_payload[36:] = sha256(
         bytearray_at(addressof(parent_pkt.wire[0]), sizeof(WIRE_PACKET))
     ).digest()[:12]
@@ -131,9 +134,36 @@ def create_child_feed(
 
 
 def create_contn_feed(
-    ending_feed: struct[FEED], contn_fid: bytearray, contn_key: bytearray
+    ending_feed: struct[FEED],
+    ending_key: bytearray,
+    contn_fid: bytearray,
+    contn_key: bytearray,
 ) -> struct[FEED]:
-    pass
+    ending_seq = (ending_feed.front_seq + 1).to_bytes(4, "big")
+    ending_pkt = create_end_pkt(
+        ending_feed.fid,
+        ending_seq,
+        ending_feed.front_mid,
+        contn_fid,
+        ending_key,
+    )
+
+    cont_feed = create_feed(
+        contn_fid, parent_fid=ending_feed.fid, parent_seq=ending_feed.front_seq + 1
+    )
+
+    cont_payload = bytearray(48)
+    cont_payload[:32] = ending_feed.fid
+    cont_payload[32:36] = ending_seq
+    cont_payload[36:] = sha256(
+        bytearray_at(addressof(ending_pkt.wire[0]), sizeof(WIRE_PACKET))
+    ).digest()[:12]
+
+    contn_pkt = create_contn_pkt(contn_fid, cont_payload, contn_key)
+
+    append_packet(cont_feed, contn_pkt)
+    append_packet(ending_feed, ending_pkt)
+    return cont_feed
 
 
 def get_feed(fid: bytearray) -> struct[FEED]:
