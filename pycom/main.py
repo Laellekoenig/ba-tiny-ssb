@@ -21,14 +21,15 @@ def init() -> None:
     n.set_master_fid(bytes(master.fid))
 
     sk, vk = create_keypair()
-    fm.create_child_feed(bytes(master.fid), vk, sk)
+    node_feed = fm.create_child_feed(master.fid, vk, sk)
+    assert node_feed is not None
 
     sk, vk = create_keypair()
-    update = fm.create_child_feed(bytes(master.fid), vk, sk)
+    update = fm.create_child_feed(master.fid, vk, sk)
     assert update is not None
 
     sk, vk = create_keypair()
-    fm.create_child_feed(bytes(update.fid), vk, sk)
+    fm.create_child_feed(update.fid, vk, sk)
 
     n.version_manager.set_update_feed(update)
     del n
@@ -61,7 +62,7 @@ def delete_dir(path: str) -> None:
     for subdir in subdirs:
         delete_dir("{}/{}".format(path, subdir))
 
-    os.remove(path)
+    os.rmdir(path)
 
 
 def run() -> None:

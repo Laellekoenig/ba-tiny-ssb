@@ -1,4 +1,5 @@
 from .feed import (
+    append_blob,
     append_bytes,
     create_feed,
     get_children,
@@ -18,7 +19,7 @@ from _thread import allocate_lock
 from json import dumps, loads
 from os import mkdir
 from pure25519 import create_keypair
-from sys import exc_info, implementation
+from sys import implementation
 from ubinascii import unhexlify, hexlify
 from uctypes import struct, addressof, BIG_ENDIAN
 from uhashlib import sha256
@@ -88,12 +89,15 @@ class FeedManager:
         self.keys = keys
         self._save_config()
 
-    def generate_keypair(self) -> Tuple[bytearray, bytearray]:
+    def generate_keypair(self, save_keys: bool=True) -> Tuple[bytearray, bytearray]:
         key, _ = create_keypair()
-        skey = bytearray(key.sk_s[:32])
-        vkey = bytearray(key.vk_s)
+        skey = key.sk_s[:32]
+        vkey = key.vk_s
         del key
-        return skey, vkey
+        if save_keys:
+            self.keys[vkey] = skey
+            self._save_config()
+        return bytearray(skey), bytearray(vkey)
 
     def listfids(self) -> List[bytearray]:
         is_feed = lambda fn: fn.endswith(".head")
@@ -255,3 +259,28 @@ class FeedManager:
             self._callback[fid] = [function]
         else:
             self._callback[fid] = (self._callback[fid]).append(function)
+
+    def remove_callback(self, fid: bytearray, function) -> None:
+        b_fid = bytes(fid)
+        if b_fid not in self._callback:
+            return
+
+        functions = self._callback[b_fid]
+        functions.remove(function)
+        self._callback[b_fid] = functions
+
+    def append_to_feed(self, fid: bytearray, payload: bytearray) -> bool:
+        try:
+            append_bytes(get_feed(fid), payload, self.keys[bytes(fid)])
+            return True
+        except Exception:
+            print("key not in dictionary")
+            return False
+
+    def append_blob_to_feed(self, fid: bytearray, payload: bytearray) -> bool:
+        try:
+            append_blob(get_feed(fid), payload, self.keys[bytes(fid)])
+            return True
+        except Exception:
+            print("key not in dictionary")
+            return False
