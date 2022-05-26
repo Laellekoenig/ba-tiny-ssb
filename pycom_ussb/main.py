@@ -1,10 +1,14 @@
 import os
-import sys
+import pycom
+from network import WLAN
 from ussb.feed import create_feed, create_child_feed, listdir
 from ussb.feed_manager import FeedManager
 from ussb.node import Node
 
-ee = 10
+
+wifi = WLAN()
+wifi.init(mode=WLAN.AP, ssid="ussb", auth=(WLAN.WPA2, "helloworld"))
+pycom.rgbled(0x00FF00)
 
 
 def init() -> None:
@@ -36,12 +40,7 @@ def clean() -> None:
         for file in listdir("_blobs"):
             if file.startswith("."):
                 continue
-            for file2 in listdir("_blobs/{}".format(file)):
-                if file2.startswith("."):
-                    continue
-                os.remove("_blobs/{}/{}".format(file, file2))
-
-            os.rmdir("_blobs/{}".format(file))
+            os.remove("_blobs{}".format(file))
         os.rmdir("_blobs")
 
     for file in listdir():
@@ -49,24 +48,6 @@ def clean() -> None:
             os.remove(file)
 
 
-def main() -> int:
-    if "c" in sys.argv:
-        clean()
-        return 0
-    if "i" in sys.argv:
-        init()
-        return 0
-    if "rr" in sys.argv:
-        clean()
-        init()
-        n = Node()
-        n.io()
-    if "r" in sys.argv:
-        n = Node(enable_http=True)
-        n.io()
-
-    return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+def run() -> None:
+    n = Node(enable_http=True)
+    n.io()

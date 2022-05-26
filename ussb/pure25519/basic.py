@@ -110,15 +110,20 @@ def add_elements(pt1, pt2): # extended->extended
 
 
 def mod(num, a):
-    num = str(num)
+    # num = str(num)
     # Initialize result
-    res = 0
+    # res = 0
  
     # One by one process all digits
     # of 'num'
-    for i in range(0, len(num)):
-        res = (res * 10 + int(num[i])) % a
+    # for i in range(0, len(num)):
+        # res = (res * 10 + int(num[i])) % a
  
+    # return res
+    res = num >> (33 * 8)
+    num = num.to_bytes(64, "big")
+    for i in range(31, 64):
+        res = ((res << 8) | num[i]) % a
     return res
 '''
 def scalarmult_element_safe_slow(pt, n):

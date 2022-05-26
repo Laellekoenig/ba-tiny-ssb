@@ -1,4 +1,5 @@
 from .feed import (
+    FEED,
     append_blob,
     append_bytes,
     create_feed,
@@ -27,7 +28,7 @@ from uhashlib import sha256
 
 # helps debugging in vim
 if implementation.name != "micropython":
-    from typing import Dict, Tuple, List, Callable, Optional
+    from typing import Dict, Tuple, List, Callable, Optional, Union
 
 
 class FeedManager:
@@ -154,16 +155,16 @@ class FeedManager:
 
                 blob_ptr = waiting_for_blob(feed)
                 if blob_ptr:
-                    self.dmx_table[blob_ptr] = (self.handle_blob, fid)
+                    self.dmx_table[bytes(blob_ptr)] = (self.handle_blob, fid)
                 else:
-                    self.dmx_table[get_next_dmx(feed)] = (self.handle_packet, fid)
+                    self.dmx_table[bytes(get_next_dmx(feed))] = (self.handle_packet, fid)
 
     def get_key(self, fid: bytearray) -> Optional[bytearray]:
         b_fid = bytes(fid)
         with self.dmx_lock:
-            if b_fid not in self.dmx_table:
+            if b_fid not in self.keys:
                 return None
-            return self.dmx_table[b_fid]
+            return self.keys[b_fid]
 
     def consult_dmx(
         self, msg: bytearray
@@ -255,10 +256,11 @@ class FeedManager:
             self.dmx_table[next_ptr] = self.handle_blob, fid
 
     def register_callback(self, fid: bytearray, function) -> None:
-        if fid not in self._callback:
-            self._callback[fid] = [function]
+        b_fid = bytes(fid)
+        if b_fid not in self._callback:
+            self._callback[b_fid] = [function]
         else:
-            self._callback[fid] = (self._callback[fid]).append(function)
+            self._callback[b_fid] = (self._callback[b_fid]).append(function)
 
     def remove_callback(self, fid: bytearray, function) -> None:
         b_fid = bytes(fid)
@@ -266,21 +268,69 @@ class FeedManager:
             return
 
         functions = self._callback[b_fid]
-        functions.remove(function)
+        if function in functions:
+            functions.remove(function)
         self._callback[b_fid] = functions
 
-    def append_to_feed(self, fid: bytearray, payload: bytearray) -> bool:
+    def append_to_feed(self, feed: Union[bytearray, struct[FEED]], payload: bytearray) -> bool:
         try:
-            append_bytes(get_feed(fid), payload, self.keys[bytes(fid)])
+            if type(feed) is bytearray:
+                feed = get_feed(feed)
+            append_bytes(feed, payload, self.keys[bytes(feed.fid)])
             return True
         except Exception:
             print("key not in dictionary")
             return False
 
-    def append_blob_to_feed(self, fid: bytearray, payload: bytearray) -> bool:
+    def append_blob_to_feed(self, feed: Union[bytearray, struct[FEED]], payload: bytearray) -> bool:
         try:
-            append_blob(get_feed(fid), payload, self.keys[bytes(fid)])
+            if type(feed) is bytearray:
+                feed = get_feed(feed)
+
+            append_blob(feed, payload, self.keys[bytes(feed.fid)])
             return True
         except Exception:
             print("key not in dictionary")
             return False
+
+
+#------------------------------------------------------------------------------
+
+def get_feed_overview() -> str:
+    # not very optimized for pycom
+    string_builder = []
+    is_feed = lambda fn: fn.endswith(".head")
+    fn2bytes = lambda fn: bytearray(unhexlify(fn[:-5].encode()))
+    fids = list(map(fn2bytes, list(filter(is_feed, listdir("_feeds")))))
+
+    for fid in fids:
+        feed = get_feed(fid)
+        if get_parent(feed):
+            continue
+        else:
+            string_builder.append(to_string(feed))
+
+        # add children below
+        children = [(x, y, 0) for x, y in get_children(feed, index=True)]
+        while children:
+            child, index, offset = children.pop(0)
+            assert type(child) is bytearray
+            child_feed = get_feed(child)
+            child_str = to_string(child_feed)
+
+            # adjust padding
+            padding_len = index - feed.anchor_seq + offset
+            padding = "      " * padding_len
+            child_str = "\n".join(
+                ["".join([padding, s]) for s in child_str.split("\n")]
+            )
+            string_builder.append(child_str)
+
+            # check for child of child
+            child_children = get_children(child_feed, index=True)
+            del child_feed
+            child_children = [(x, y, padding_len) for x, y in child_children]
+            del padding_len
+            children = child_children + children
+
+    return "\n".join(string_builder)

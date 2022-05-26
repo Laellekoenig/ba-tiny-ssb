@@ -272,7 +272,7 @@ def create_upd_pkt(
     payload[:1] = to_var_int(fn_len)
     payload[1 : fn_len + 1] = file_name
     payload[fn_len + 1 : fn_len + 5] = v_number
-    pkt_type = UPDFILE.to_bytes(1, "big")
+    pkt_type = bytearray(UPDFILE.to_bytes(1, "big"))
     return new_packet(fid, seq, prev_mid, payload, pkt_type, key)
 
 
@@ -289,7 +289,7 @@ def create_apply_pkt(
     payload = bytearray(48)
     payload[:32] = file_fid
     payload[32:36] = update_seq
-    pkt_type = APPLYUP.to_bytes(1, "big")
+    pkt_type = bytearray(APPLYUP.to_bytes(1, "big"))
     return new_packet(fid, seq, prev_mid, payload, pkt_type, key)
 
 
@@ -322,7 +322,7 @@ def create_chain(
     payload[:vil] = var_int
     payload[vil:28] = content[: 28 - vil]
     # update content length
-    content_len -= 28 - vil
+    content_len -= (28 - vil)
 
     # prepare blob content
     blob_content = bytearray(expected_num_blobs * 100)

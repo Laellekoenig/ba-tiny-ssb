@@ -35,7 +35,7 @@ from uctypes import (
     struct,
 )
 from uhashlib import sha256
-from uos import ilistdir, mkdir
+from uos import ilistdir, mkdir, stat
 
 
 # helps debugging in vim
@@ -203,7 +203,6 @@ def get_wire(feed: struct[FEED], i: int) -> bytearray:
 
 def get_payload(feed: struct[FEED], i: int) -> bytearray:
     wire_array = get_wire(feed, i)
-    collect()
 
     # maybe direct array access instead?
     wpkt = struct(addressof(wire_array), WIRE_PACKET, BIG_ENDIAN)
@@ -401,7 +400,7 @@ def waiting_for_blob(feed: struct[FEED]) -> Optional[bytearray]:
     if wpkt[15:16] != CHAIN20.to_bytes(1, "BIG"):
         return None
 
-    ptr = wpkt[16:36]
+    ptr = wpkt[44:64]
     null_ptr = bytearray(20)
     while ptr != null_ptr:
         hex_ptr = hexlify(ptr).decode()
@@ -464,24 +463,22 @@ def get_want(feed: struct[FEED]) -> bytearray:
         return want
 
 
-def add_upd_file_name(
+def add_upd(
     feed: struct[FEED], file_name: str, key: bytearray, v_number: int = 0
 ) -> None:
-    fn_array = bytearray(file_name.encode())
-    vn_array = bytearray(v_number.to_bytes(4, "big"))
+    seq = bytearray(feed.front_seq.to_bytes(4, "big"))
     pkt = create_upd_pkt(
         feed.fid,
-        (feed.front_seq + 1).to_bytes(4, "big"),
+        seq,
         feed.front_mid,
-        fn_array,
-        vn_array,
+        bytearray(file_name.encode()),
+        bytearray(v_number.to_bytes(4, "big")),
         key,
     )
-
     append_packet(feed, pkt)
 
 
-def get_upd_file_name(feed: struct[FEED]) -> Optional[Tuple[str, int]]:
+def get_upd(feed: struct[FEED]) -> Optional[Tuple[str, int]]:
     # assumes that the upp packet is at position 2 in the feed!
     wpkt = get_wire(feed, 2)
     # check type
@@ -494,7 +491,7 @@ def get_upd_file_name(feed: struct[FEED]) -> Optional[Tuple[str, int]]:
     offset2 = offset + fn_len
     file_name = wpkt[offset:offset2].decode()
     del offset
-    v_num = int.from_bytes(wpkt[offset2 : offset2 + 3], "big")
+    v_num = int.from_bytes(wpkt[offset2 : offset2 + 4], "big")
     del offset2
 
     return file_name, v_num
@@ -503,16 +500,15 @@ def get_upd_file_name(feed: struct[FEED]) -> Optional[Tuple[str, int]]:
 def add_apply(
     feed: struct[FEED], file_fid: bytearray, v_num: int, key: bytearray
 ) -> None:
-    vn_arr = bytearray(v_num.to_bytes(4, "big"))
+    seq = ((feed.front_seq + 1).to_bytes(4, "big"))
     pkt = create_apply_pkt(
         feed.fid,
-        (feed.front_seq + 1).to_bytes(4, "big"),
+        seq,
         feed.front_mid,
         file_fid,
-        vn_arr,
+        bytearray(v_num.to_bytes(4, "big")),
         key,
     )
-
     append_packet(feed, pkt)
 
 
@@ -522,11 +518,19 @@ def get_newest_apply(feed: struct[FEED], file_fid: bytearray) -> Optional[int]:
     for i in range(feed.front_seq, feed.anchor_seq, -1):
         wpkt = get_wire(feed, i)
         if wpkt[15:16] == applyup:
-            if wpkt[16:48] == file_fid:
+            if wpkt[16:48] == bytes(file_fid):
                 return int.from_bytes(wpkt[48:52], "big")
         del wpkt
 
     return None
+
+
+def length(feed: struct[FEED]) -> int:
+    length = (
+        stat("".join(["_feeds/", hexlify(bytes(feed.fid)).decode(), ".log"]))[6] // 128
+    )
+    assert type(length) is int
+    return length
 
 
 # less relevant functions
@@ -543,7 +547,11 @@ def to_string(feed: struct[FEED]) -> str:
     feed_str = "| HDR |"
 
     for i in range(anchor_seq + 1, front_seq + 1):
-        numbers = "".join([numbers, "   {}  ".format(i)])
+        if i < 10:
+            numbers = "".join([numbers, "   {}  ".format(i)])
+        else:
+            numbers = "".join([numbers, "  {}  ".format(i)])
+
         pkt_type = int.from_bytes(get_wire(feed, i)[15:16], "big")
 
         if pkt_type == PLAIN48:
