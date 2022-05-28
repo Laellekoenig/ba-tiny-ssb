@@ -331,7 +331,7 @@ def verify_and_append_bytes(feed: struct[FEED], wpkt: bytearray) -> bool:
 
 
 def get_parent(feed: struct[FEED]) -> Optional[bytearray]:
-    if feed.anchor_seq != 0 or feed.front_mid < 1:
+    if feed.anchor_seq != 0 or feed.front_seq < 1:
         return None
     wire = get_wire(feed, 1)
 

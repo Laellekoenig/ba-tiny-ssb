@@ -36,16 +36,16 @@ def clean() -> None:
                 os.remove("_feeds/{}".format(file))
         os.rmdir("_feeds")
 
-    if "_blobs" in listdir():
-        for file in listdir("_blobs"):
-            if file.startswith("."):
-                continue
-            os.remove("_blobs{}".format(file))
-        os.rmdir("_blobs")
-
     for file in listdir():
         if file.endswith(".json"):
             os.remove(file)
+
+    if "_blobs" in listdir():
+        for file in listdir("_blobs"):
+            for file2 in listdir("_blobs/{}".format(file)):
+                os.remove("_blobs/{}/{}".format(file, file2))
+            os.rmdir("_blobs/{}".format(file))
+        os.rmdir("_blobs")
 
 
 def run() -> None:
