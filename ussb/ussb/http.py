@@ -7,9 +7,9 @@ from .html import (
     get_file_browser,
     get_version_status,
 )
-from .feed_manager import FeedManager
-from .version_manager import VersionManager
 from .html import get_index
+from .util import PYCOM
+from .version_manager import VersionManager
 from json import loads
 from sys import implementation
 from usocket import socket
@@ -129,7 +129,11 @@ def _handle_post(client: socket, request: List[str]) -> None:
         version = int(split[-1])
         file_name = "_".join(split[:-1])
         del split
-        code = "\n".join(request[15:])
+
+        if PYCOM:
+            code = "\n".join(request[12:])
+        else:
+            code = "\n".join(request[15:])
 
         if type(Holder.vm) is not VersionManager:
             client.close()

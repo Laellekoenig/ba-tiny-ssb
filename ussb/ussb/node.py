@@ -1,8 +1,9 @@
-from .feed import get_children, length, listdir, get_want, get_feed, FEED
+from .feed import get_children, length, get_want, get_feed, FEED
 from .feed_manager import FeedManager
 from .html import Holder as HTMLHolder
 from .http import Holder as HTTPHolder
 from .http import run_http
+from .util import listdir
 from .version_manager import VersionManager
 from json import dumps, loads
 from time import sleep

@@ -21,8 +21,7 @@ from .packet import (
     new_packet,
     pkt_from_wire,
 )
-from gc import collect
-from sys import implementation
+from sys import implementation, platform
 from ubinascii import hexlify
 from uctypes import (
     ARRAY,
@@ -41,6 +40,12 @@ from uos import ilistdir, mkdir, stat
 # helps debugging in vim
 if implementation.name != "micropython":
     from typing import Optional, List, Tuple, Union
+
+
+pycom = False
+if platform in ("FiPy", "LoPy"):
+    pycom = True
+    from os import listdir as oslistdir
 
 
 FEED = {
@@ -64,11 +69,6 @@ get_header_fn = lambda fid: "_feeds/{}.head".format(hexlify(fid).decode())
 
 
 # this has to be changed for pycom
-def listdir(path: Optional[str] = None) -> List[str]:
-    if path is None:
-        return [name for name, _, _ in list(ilistdir())]
-    else:
-        return [name for name, _, _ in list(ilistdir(path))]
 
 
 def get_feed(fid: bytearray) -> struct[FEED]:
@@ -500,7 +500,7 @@ def get_upd(feed: struct[FEED]) -> Optional[Tuple[str, int]]:
 def add_apply(
     feed: struct[FEED], file_fid: bytearray, v_num: int, key: bytearray
 ) -> None:
-    seq = ((feed.front_seq + 1).to_bytes(4, "big"))
+    seq = (feed.front_seq + 1).to_bytes(4, "big")
     pkt = create_apply_pkt(
         feed.fid,
         seq,

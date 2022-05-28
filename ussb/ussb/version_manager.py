@@ -10,8 +10,6 @@ from .feed import (
     get_upd,
     get_wire,
     length,
-    listdir,
-    to_string,
     waiting_for_blob,
 )
 from .feed_manager import FeedManager
@@ -24,8 +22,8 @@ from .packet import (
     from_var_int,
     to_var_int,
 )
+from .util import listdir, walk, create_dirs_and_file
 from json import dumps, loads
-from os import stat, mkdir
 from sys import implementation
 from ubinascii import hexlify, unhexlify
 from uctypes import struct
@@ -35,45 +33,6 @@ from uctypes import struct
 if implementation.name != "micropython":
     # from typing import List
     from typing import List, Tuple, Dict, Callable, Optional
-
-
-def walk() -> List[str]:
-    final = []
-    files = listdir()
-    while files:
-        fn = files.pop(0)
-        if fn.startswith(".") or "/." in fn:
-            continue
-
-        if stat(fn)[0] == 0x81A4:
-            final.append(fn)
-        else:
-            files += ["{}/{}".format(fn, x) for x in listdir(fn)]
-
-    return final
-
-
-def create_dirs_and_file(path: str) -> None:
-    if path.startswith("/"):
-        path = path[1:]
-    if path.endswith("/"):
-        path = path[:-1]
-
-    split = path.split("/")
-    dirs = split[:-1]
-    del split
-
-    current_path = None
-    for d in dirs:
-        if d not in listdir(current_path):
-            new_dir = d if current_path is None else "".join([current_path, "/", d])
-            mkdir(new_dir)
-            del new_dir
-        current_path = d if current_path is None else "".join([current_path, "/", d])
-
-    f = open(path, "wb")
-    f.write(b"")
-    f.close()
 
 
 class VersionManager:
@@ -115,7 +74,7 @@ class VersionManager:
                 hexlify(bytes(k)).decode(): v for k, v in self.apply_queue.items()
             },
             "apply_dict": self.apply_dict,
-            "update_fid": hexlify(self.update_feed.fid).decode()
+            "update_fid": hexlify(self.update_feed.fid).decode(),
         }
         f = open("update_cfg.json", "w")
         f.write(dumps(cfg))
@@ -603,6 +562,8 @@ class VersionManager:
         self.vc_dict[file_name] = (cfid, efid)
         self.apply_dict[file_name] = 0
         self._save_config()
+
+
 # ------------------------------------UTIL--------------------------------------
 def apply_changes(content: str, changes: List[Tuple[int, str, str]]) -> str:
     old_lines = content.split("\n")
@@ -858,21 +819,19 @@ def changes_to_bytes(changes: List[Tuple[int, str, str]], dependency: int) -> by
     for change in changes:
         i, op, ln = change  # unpack triple
         # if ln == "":
-            # b_change = to_var_int(i) + op.encode() + bytes(1)  # encode empty line as null
+        # b_change = to_var_int(i) + op.encode() + bytes(1)  # encode empty line as null
         # else:
         b_change = to_var_int(i) + op.encode() + ln.encode()
         b += to_var_int(len(b_change)) + b_change
     return bytearray(b)
 
 
-def string_version_graph(
-    feed: struct[FEED], applied: Optional[int] = None
-) -> str:
+def string_version_graph(feed: struct[FEED], applied: Optional[int] = None) -> str:
     """
     Prints a representation of the current update dependency graph. The currently
     applied update is highlighted.
     """
-    graph, _ = extract_version_graph(feed) 
+    graph, _ = extract_version_graph(feed)
 
     if graph == {}:
         return ""  # nothing appended to update graph yet

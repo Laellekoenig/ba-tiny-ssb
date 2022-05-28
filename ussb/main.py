@@ -1,10 +1,9 @@
-import os
-import sys
-from ussb.feed import create_feed, create_child_feed, listdir
+from ussb.feed import create_feed, create_child_feed
 from ussb.feed_manager import FeedManager
 from ussb.node import Node
-
-ee = 10
+from ussb.util import listdir
+import os
+import sys
 
 
 def init() -> None:

@@ -9,13 +9,13 @@ from .feed import (
     get_parent,
     get_want,
     get_wire,
-    listdir,
     to_string,
     verify_and_append_blob,
     verify_and_append_bytes,
     waiting_for_blob,
 )
 from .packet import CONTDAS, MKCHILD, WIRE_PACKET
+from .util import listdir
 from _thread import allocate_lock
 from json import dumps, loads
 from os import mkdir
@@ -81,8 +81,7 @@ class FeedManager:
         f = open(file_name)
         str_dict = loads(f.read())
         self.keys = {
-            unhexlify(k.encode()): unhexlify(v.encode())
-            for k, v in str_dict.items()
+            unhexlify(k.encode()): unhexlify(v.encode()) for k, v in str_dict.items()
         }
         f.close()
 
@@ -90,7 +89,7 @@ class FeedManager:
         self.keys = keys
         self._save_config()
 
-    def generate_keypair(self, save_keys: bool=True) -> Tuple[bytearray, bytearray]:
+    def generate_keypair(self, save_keys: bool = True) -> Tuple[bytearray, bytearray]:
         key, _ = create_keypair()
         skey = key.sk_s[:32]
         vkey = key.vk_s
@@ -157,7 +156,10 @@ class FeedManager:
                 if blob_ptr:
                     self.dmx_table[bytes(blob_ptr)] = (self.handle_blob, fid)
                 else:
-                    self.dmx_table[bytes(get_next_dmx(feed))] = (self.handle_packet, fid)
+                    self.dmx_table[bytes(get_next_dmx(feed))] = (
+                        self.handle_packet,
+                        fid,
+                    )
 
     def get_key(self, fid: bytearray) -> Optional[bytearray]:
         b_fid = bytes(fid)
@@ -222,7 +224,10 @@ class FeedManager:
 
         # check for continuation or child feed
         front_wire = get_wire(feed, -1)
-        if front_wire[15:16] in [CONTDAS.to_bytes(1, "big"), MKCHILD.to_bytes(1, "big")]:
+        if front_wire[15:16] in [
+            CONTDAS.to_bytes(1, "big"),
+            MKCHILD.to_bytes(1, "big"),
+        ]:
             create_feed(front_wire[16:48], parent_seq=feed.front_seq, parent_fid=fid)
 
         # callbacks
@@ -272,7 +277,9 @@ class FeedManager:
             functions.remove(function)
         self._callback[b_fid] = functions
 
-    def append_to_feed(self, feed: Union[bytearray, struct[FEED]], payload: bytearray) -> bool:
+    def append_to_feed(
+        self, feed: Union[bytearray, struct[FEED]], payload: bytearray
+    ) -> bool:
         try:
             if type(feed) is bytearray:
                 feed = get_feed(feed)
@@ -282,7 +289,9 @@ class FeedManager:
             print("key not in dictionary")
             return False
 
-    def append_blob_to_feed(self, feed: Union[bytearray, struct[FEED]], payload: bytearray) -> bool:
+    def append_blob_to_feed(
+        self, feed: Union[bytearray, struct[FEED]], payload: bytearray
+    ) -> bool:
         try:
             if type(feed) is bytearray:
                 feed = get_feed(feed)
@@ -294,7 +303,8 @@ class FeedManager:
             return False
 
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+
 
 def get_feed_overview() -> str:
     # not very optimized for pycom
