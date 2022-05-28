@@ -1,9 +1,10 @@
-import os
-import pycom
 from network import WLAN
-from ussb.feed import create_feed, create_child_feed, listdir
+from ussb.feed import create_feed, create_child_feed
 from ussb.feed_manager import FeedManager
 from ussb.node import Node
+from ussb.util import listdir
+import os
+import pycom
 
 
 wifi = WLAN()
