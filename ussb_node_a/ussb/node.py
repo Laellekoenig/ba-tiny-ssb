@@ -7,6 +7,7 @@ from .util import listdir
 from .version_manager import VersionManager
 from _thread import start_new_thread, allocate_lock
 from sys import maxsize, platform
+from os import urandom
 from json import dumps, loads
 from hashlib import sha256
 from time import sleep
@@ -27,7 +28,7 @@ class Node:
 
     __slots__ = (
         "feed_manager",
-        "master_feed",
+        "master_fid",
         "queue",
         "queue_lock",
         "group",
@@ -35,11 +36,12 @@ class Node:
         "version_manager",
         "prev_send",
         "prev_send_lock",
+        "this",
     )
 
     def __init__(self, enable_http: bool = False) -> None:
         self.feed_manager = FeedManager()
-        self.master_feed = None
+        self.master_fid = None
         self._load_config()
         self.queue_lock = allocate_lock()
         self.queue = []
@@ -51,15 +53,16 @@ class Node:
         # FIXME: bodge
         HTTPHolder.vm = self.version_manager
         HTMLHolder.vm = self.version_manager
+        self.this = urandom(8)
 
     def __del__(self) -> None:
         self._save_config()
 
     def _save_config(self) -> None:
-        if self.master_feed is None:
+        if self.master_fid is None:
             return
 
-        cfg = {"master_fid": hexlify(bytes(self.master_feed.fid)).decode()}
+        cfg = {"master_fid": hexlify(bytes(self.master_fid)).decode()}
         f = open("node_cfg.json", "w")
         f.write(dumps(cfg))
         f.close()
@@ -67,40 +70,37 @@ class Node:
     def _load_config(self) -> None:
         file_name = "node_cfg.json"
         if file_name not in listdir():
-            self.master_feed = None
+            self.master_fid = None
             return
 
         f = open(file_name)
         cfg = loads(f.read())
         f.close()
 
-        master_fid = bytearray(unhexlify(cfg["master_fid"].encode()))
-        self.master_feed = get_feed(master_fid)
+        self.master_fid = bytearray(unhexlify(cfg["master_fid"].encode()))
 
     def set_master_feed(self, feed: struct[FEED]) -> None:
-        self.master_feed = feed
+        self.master_fid = feed.fid
         if length(feed) >= 2:
             update_fid = get_children(feed)[1]
             assert type(update_fid) is bytearray
-            update_feed = get_feed(update_fid)
-            self.version_manager.set_update_feed(update_feed)
+            self.version_manager.set_update_feed(update_fid)
 
         self._save_config()
 
     def _start_version_manager(self) -> None:
-        if self.master_feed is None:
+        if self.master_fid is None:
             return
 
-        children = get_children(self.master_feed)
+        master_feed = get_feed(self.master_fid)
+        children = get_children(master_feed)
         if len(children) < 2:
             return
 
         update_fid = children[1]
         assert type(update_fid) is bytearray
-        update_feed = get_feed(update_fid)
-        assert update_feed is not None
-
-        self.version_manager.set_update_feed(update_feed)
+        print(update_fid)
+        self.version_manager.set_update_feed(update_fid)
 
     def _listen(self, sock: socket) -> None:
         while True:
@@ -108,10 +108,13 @@ class Node:
             # if port == own:
                 # continue
 
-            with self.prev_send_lock:
-                if msg == self.prev_send:
-                    continue
+            # with self.prev_send_lock:
+                # if msg == self.prev_send:
+                    # continue
+            if msg[:8] == bytes(self.this):
+                continue
 
+            msg = msg[8:]
             msg_len = len(msg)
 
             if msg_len > 128:
@@ -127,7 +130,8 @@ class Node:
                     fn, fid = tpl
                     req_wire = fn(fid, msg)
                     with self.queue_lock:
-                        self.queue.append(req_wire)
+                        if req_wire is not None:
+                            self.queue.insert(0, req_wire)
                     continue
 
             # packet
@@ -144,6 +148,8 @@ class Node:
                     with self.queue_lock:
                         self.queue.insert(0, get_want(get_feed(fid)))
                     continue
+                else:
+                    print("not in dmx: ", int.from_bytes(msg[15:16], "big"))
 
             # FIX: ignore reserved 8B?
             else:
@@ -157,23 +163,27 @@ class Node:
 
     def _send(self, sock: socket) -> None:
         while True:
-            msg = None
             with self.queue_lock:
-                if len(self.queue) > 0:
+                if self.queue:
                     msg = self.queue.pop(0)
-                else:
-                    for fid in self.feed_manager.fids:
+                    try:
+                        sock.sendto(self.this + msg, self.group)
+                    except:
+                        print("error send: ", type(msg))
+                    with self.prev_send_lock:
+                        self.prev_send = bytes(msg)
+            sleep(0.4)
+
+    def _fill_wants(self) -> None:
+        while True:
+            with self.queue_lock:
+                if not self.queue:
+                    for fid in self.feed_manager.listfids():
                         if bytes(fid) not in self.feed_manager.keys:
-                            self.queue.append(get_want(get_feed(fid)))
-                    continue
-
-            if msg is None:
-                continue
-
-            sock.sendto(msg, self.group)
-            with self.prev_send_lock:
-                self.prev_send = bytes(msg)
-            sleep(0.2)  # add some delay
+                            want = get_want(get_feed(fid))
+                            if want:
+                                self.queue.append(want)
+            sleep(0.5)
 
     def io(self) -> None:
         # http socket
@@ -188,6 +198,8 @@ class Node:
         if platform == "darwin":
             mreq = bytes([int(i) for i in "224.1.1.1".split(".")]) + bytes(4)
             rx.setsockopt(0, 12, mreq)
+
+        start_new_thread(self._fill_wants, ())
 
         if self.http:
             start_new_thread(self._listen, (rx,))

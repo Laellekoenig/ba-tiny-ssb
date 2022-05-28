@@ -253,7 +253,6 @@ def append_packet(feed: struct[FEED], pkt: struct[PACKET]) -> None:
 
     # update header
     feed.front_mid[:] = pkt.mid
-    del pkt
     feed.front_seq += 1
     save_header(feed)
 
@@ -285,7 +284,7 @@ def append_bytes(feed: struct[FEED], payload: bytearray, key: bytearray) -> None
 
 def append_blob(feed: struct[FEED], payload: bytearray, key: bytearray) -> None:
     pkt, blobs = create_chain(
-        feed.fid, feed.front_seq.to_bytes(4, "big"), feed.front_mid, payload, key
+        feed.fid, (feed.front_seq + 1).to_bytes(4, "big"), feed.front_mid, payload, key
     )
 
     ptr = hexlify(pkt.wire[0].payload[-20:]).decode()
@@ -462,7 +461,7 @@ def get_want(feed: struct[FEED]) -> bytearray:
 def add_upd(
     feed: struct[FEED], file_name: str, key: bytearray, v_number: int = 0
 ) -> None:
-    seq = bytearray(feed.front_seq.to_bytes(4, "big"))
+    seq = bytearray((feed.front_seq + 1).to_bytes(4, "big"))
     pkt = create_upd_pkt(
         feed.fid,
         seq,

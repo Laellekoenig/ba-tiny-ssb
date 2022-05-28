@@ -41,8 +41,8 @@ class VersionManager:
         "vc_dict",
         "apply_queue",
         "apply_dict",
-        "update_feed",
-        "vc_feed",
+        "update_fid",
+        "vc_fid",
         "may_update",
         "feed_manager",
     )
@@ -52,19 +52,19 @@ class VersionManager:
         self.vc_dict = {}
         self.apply_queue = {}
         self.apply_dict = {}
-        self.update_feed = None
-        self.vc_feed = None
+        self.update_fid = None
+        self.vc_fid = None
         self._load_config()
-        if self.update_feed is None:
+        if self.update_fid is None:
             self.may_update = False
-        elif bytes(self.update_feed.fid) in self.feed_manager.keys:
+        elif bytes(self.update_fid) in self.feed_manager.keys:
             self.may_update = True
 
     def __del__(self) -> None:
         self._save_config()
 
     def _save_config(self) -> None:
-        assert self.update_feed is not None
+        assert self.update_fid is not None
         cfg = {
             "vc_dict": {
                 k: (hexlify(v[0]).decode(), hexlify(v[1]).decode())
@@ -74,7 +74,7 @@ class VersionManager:
                 hexlify(bytes(k)).decode(): v for k, v in self.apply_queue.items()
             },
             "apply_dict": self.apply_dict,
-            "update_fid": hexlify(self.update_feed.fid).decode(),
+            "update_fid": hexlify(self.update_fid).decode(),
         }
         f = open("update_cfg.json", "w")
         f.write(dumps(cfg))
@@ -106,28 +106,28 @@ class VersionManager:
         }
 
         self.apply_dict = cfg["apply_dict"]
-        self.update_feed = get_feed(unhexlify((cfg["update_fid"]).encode()))
+        self.update_fid = unhexlify((cfg["update_fid"]).encode())
 
-        children = get_children(self.update_feed)
+        children = get_children(get_feed(self.update_fid))
         if len(children) > 1:
             vc_fid = children[0]
             assert type(vc_fid) is bytearray
-            self.vc_feed = get_feed(vc_fid)
+            self.vc_fid = vc_fid
 
     def is_configured(self) -> bool:
-        return self.update_feed is not None
+        return self.update_fid is not None
 
-    def set_update_feed(self, update_feed: struct[FEED]) -> None:
-        self.update_feed = update_feed
+    def set_update_feed(self, update_fid: bytearray) -> None:
+        self.update_fid = update_fid
 
-        children = get_children(update_feed)
+        feed = get_feed(update_fid)
+        children = get_children(feed)
         if len(children) >= 1:
             vc_fid = children[0]
             assert type(vc_fid) is bytearray
-            self.vc_feed = get_feed(vc_fid)
-            assert self.vc_feed is not None, "failed to get version control feed"
+            self.vc_fid = vc_fid
 
-        if bytes(update_feed.fid) not in self.feed_manager.keys:
+        if bytes(update_fid) not in self.feed_manager.keys:
             self.may_update = False
             self._register_callbacks()
             return
@@ -144,12 +144,12 @@ class VersionManager:
                 and not f.endswith(".json")
                 and not f.endswith(".head")
             ):
-                update_key = self.feed_manager.get_key(update_feed.fid)
+                update_key = self.feed_manager.get_key(update_fid)
                 assert update_key is not None
 
                 # create new update feed for file
                 ckey, cfid = self.feed_manager.generate_keypair()
-                new = create_child_feed(update_feed, update_key, cfid, ckey)
+                new = create_child_feed(feed, update_key, cfid, ckey)
                 assert new is not None, "failed to create new file feed"
                 add_upd(new, f, ckey)
 
@@ -165,16 +165,16 @@ class VersionManager:
                 self._save_config()
 
     def _register_callbacks(self) -> None:
-        if self.update_feed is None:
+        if self.update_fid is None:
             return
 
         # update feed
         self.feed_manager.register_callback(
-            self.update_feed.fid, self._update_feed_callback
+            self.update_fid, self._update_feed_callback
         )
 
         # check for version control feed
-        children = get_children(self.update_feed)
+        children = get_children(get_feed(self.update_fid))
         if len(children) < 1:
             return
 
@@ -194,25 +194,23 @@ class VersionManager:
             )
 
     def _update_feed_callback(self, fid: bytearray) -> None:
-        assert self.update_feed is not None, "no update feed set"
-        assert self.update_feed.fid == fid, "not called on update feed"
+        assert self.update_fid is not None, "no update feed set"
+        assert self.update_fid == fid, "not called on update feed"
 
         # FIXME: can be removed?
-        if waiting_for_blob(self.update_feed) is not None:
-            return  # waiting for blob, nothing to update
+        print("UPDATE FEED CALLBACK")
 
-        children = get_children(self.update_feed)
+        children = get_children(get_feed(self.update_fid))
 
-        if self.vc_feed is None:
+        if self.vc_fid is None:
             # check if version control feed was added (first child)
             if len(children) >= 1:
                 vc_fid = children[0]
                 assert type(vc_fid) is bytearray
-                self.vc_feed = get_feed(vc_fid)
-                assert self.vc_feed is not None, "failed to get feed"
+                self.vc_fid = vc_fid
                 # register callback
                 self.feed_manager.register_callback(
-                    self.vc_feed.fid, self._vc_feed_callback
+                    self.vc_fid, self._vc_feed_callback
                 )
                 return
             else:
@@ -221,24 +219,27 @@ class VersionManager:
         # new file update feed
         new_fid = children[-1]
         assert type(new_fid) is bytearray
+        print("registering new file feed callback")
         self.feed_manager.register_callback(new_fid, self._file_feed_callback)
 
     def _vc_feed_callback(self, fid: bytearray) -> None:
-        assert self.vc_feed is not None, "version control feed not found"
+        assert self.vc_fid is not None, "version control feed not found"
+        print("VC FEED CALLBACK")
 
-        front_type = get_wire(self.vc_feed, -1)[15:16]
+        front_type = get_wire(get_feed(self.vc_fid), -1)[15:16]
         if front_type == ISCHILD.to_bytes(1, "big"):
             return  # first packet in version control feed -> ignore
 
         if front_type == APPLYUP.to_bytes(1, "big"):
             print("applying update")
-            payload = get_payload(self.vc_feed, -1)
+            payload = get_payload(get_feed(self.vc_fid), -1)
             fid, seq = payload[:32], payload[32:36]
             self._apply_update(fid, seq)
 
     def _file_feed_callback(self, fid: bytearray) -> None:
         feed = get_feed(fid)
         assert feed is not None, "failed to get feed"
+        print("FILE FEED CALLBACK")
 
         if waiting_for_blob(feed) is not None:
             return  # blob not complete
@@ -301,6 +302,8 @@ class VersionManager:
         feed = get_feed(fid)
         assert feed is not None, "failed to get feed"
 
+        print("EMERGENCY FEED CALLBACK")
+
         if waiting_for_blob(feed) is not None:
             return  # wait for completion of blob
 
@@ -332,7 +335,7 @@ class VersionManager:
             self._save_config()
 
     def _apply_update(self, fid: bytearray, seq: bytearray) -> None:
-        assert self.vc_feed is not None
+        assert self.vc_fid is not None
 
         # convert
         int_seq = int.from_bytes(seq, "big")
@@ -405,7 +408,7 @@ class VersionManager:
         self._save_config()
 
     def update_file(self, file_name: str, update: str, dep: int):
-        assert self.vc_feed is not None
+        assert self.vc_fid is not None
 
         if not self.may_update:
             print("may not append new updates")
@@ -456,7 +459,7 @@ class VersionManager:
     def emergency_update_file(
         self, file_name: str, update: str, depends_on: int
     ) -> Optional[int]:
-        assert self.vc_feed is not None, "need vc feed to update"
+        assert self.vc_fid is not None, "need vc feed to update"
 
         if not self.may_update:
             print("may not append new updates")
@@ -502,7 +505,7 @@ class VersionManager:
         self.feed_manager.register_callback(nfid, self._emergency_feed_callback)
 
     def add_apply(self, file_name: str, v_num: int) -> None:
-        assert self.vc_feed is not None, "no version control feed present"
+        assert self.vc_fid is not None, "no version control feed present"
 
         if not self.may_update:
             print("may not apply updates")
@@ -531,12 +534,12 @@ class VersionManager:
             return
 
         # add to version control feed and apply locally
-        key = self.feed_manager.keys[bytes(self.vc_feed.fid)]
-        add_apply(self.vc_feed, fid, v_num, key)
+        key = self.feed_manager.keys[bytes(self.vc_fid)]
+        add_apply(get_feed(self.vc_fid), fid, v_num, key)
         self._apply_update(fid, bytearray(v_num.to_bytes(4, "big")))
 
     def create_new_file(self, file_name: str) -> None:
-        assert self.update_feed is not None
+        assert self.update_fid is not None
         print("creating new file: {}".format(file_name))
 
         if file_name in walk():
@@ -547,9 +550,9 @@ class VersionManager:
 
         # create new feed
         ckey, cfid = self.feed_manager.generate_keypair()
-        ukey = self.feed_manager.get_key(self.update_feed.fid)
+        ukey = self.feed_manager.get_key(self.update_fid)
         assert ukey is not None
-        feed = create_child_feed(self.update_feed, ukey, cfid, ckey)
+        feed = create_child_feed(get_feed(self.update_fid), ukey, cfid, ckey)
         assert feed is not None
         add_upd(feed, file_name, ckey)
 

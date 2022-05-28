@@ -6,6 +6,9 @@ import os
 import sys
 
 
+pls_work=1
+
+
 def init() -> None:
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()

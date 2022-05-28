@@ -1,9 +1,12 @@
-from ussb.feed import create_feed, create_child_feed
+from ussb.feed import create_feed, create_child_feed, get_wire
 from ussb.feed_manager import FeedManager
 from ussb.node import Node
 from ussb.util import listdir
 import os
 import sys
+
+
+pls_work=1
 
 
 def init() -> None:

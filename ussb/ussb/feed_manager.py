@@ -38,6 +38,7 @@ class FeedManager:
         "fids",
         "dmx_lock",
         "dmx_table",
+        "callback_lock",
         "_callback",
     )
 
@@ -51,6 +52,7 @@ class FeedManager:
         self.dmx_lock = allocate_lock()
         self.dmx_table = {}
         self._fill_dmx()
+        self.callback_lock = allocate_lock()
         self._callback = {}
 
     def _create_dirs(self) -> None:
@@ -147,20 +149,21 @@ class FeedManager:
 
     def _fill_dmx(self) -> None:
         with self.dmx_lock:
-            for fid in self.fids:
+            for fid in self.listfids():
                 feed = get_feed(fid)
                 b_fid = bytes(feed.fid)
                 want = get_want(feed)[:7]
                 self.dmx_table[bytes(want)] = (self.handle_want, b_fid)
 
-                blob_ptr = waiting_for_blob(feed)
-                if blob_ptr:
-                    self.dmx_table[bytes(blob_ptr)] = (self.handle_blob, b_fid)
-                else:
-                    self.dmx_table[bytes(get_next_dmx(feed))] = (
-                        self.handle_packet,
-                        b_fid,
-                    )
+                if bytes(fid) not in self.keys:
+                    blob_ptr = waiting_for_blob(feed)
+                    if blob_ptr:
+                        self.dmx_table[bytes(blob_ptr)] = (self.handle_blob, b_fid)
+                    else:
+                        self.dmx_table[bytes(get_next_dmx(feed))] = (
+                            self.handle_packet,
+                            b_fid,
+                        )
 
     def get_key(self, fid: bytearray) -> Optional[bytearray]:
         b_fid = bytes(fid)
@@ -182,7 +185,9 @@ class FeedManager:
         req_feed = get_feed(fid)
         req_seq = int.from_bytes(request[39:43], "big")
         # check seq number
+        print("want for: {} at {}".format(hexlify(fid).decode()[:7], req_seq))
         if req_feed.front_seq < req_seq:
+            print("-packet wire not available")
             return None
 
         req_wire = bytearray(128)
@@ -230,12 +235,19 @@ class FeedManager:
             MKCHILD.to_bytes(1, "big"),
         ]:
             # creating new feed
-            create_feed(front_wire[16:48], parent_seq=feed.front_seq, parent_fid=fid)
+            new_feed = create_feed(front_wire[16:48], parent_seq=feed.front_seq, parent_fid=fid)
+            with self.dmx_lock:
+                b_fid = bytes(new_feed.fid)
+                want = get_want(new_feed)[:7]
+                self.dmx_table[bytes(want)] = (self.handle_want, b_fid)
+                next_dmx = get_next_dmx(new_feed)
+                self.dmx_table[bytes(next_dmx)] = (self.handle_packet, b_fid)
 
         # callbacks
-        if fid in self._callback:
-            for function in self._callback[fid]:
-                function(fid)
+        with self.callback_lock:
+            if fid in self._callback:
+                for function in self._callback[fid]:
+                    function(fid)
 
     def handle_blob(self, fid: bytearray, blob: bytearray) -> None:
         feed = get_feed(fid)
@@ -253,9 +265,10 @@ class FeedManager:
             with self.dmx_lock:
                 self.dmx_table[get_next_dmx(feed)] = self.handle_packet, fid
 
-                if fid in self._callback:
-                    for function in self._callback[fid]:
-                        function(fid)
+                with self.callback_lock:
+                    if fid in self._callback:
+                        for function in self._callback[fid]:
+                            function(fid)
 
                 return
 
@@ -264,20 +277,29 @@ class FeedManager:
 
     def register_callback(self, fid: bytearray, function) -> None:
         b_fid = bytes(fid)
-        if b_fid not in self._callback:
-            self._callback[b_fid] = [function]
-        else:
-            self._callback[b_fid] = (self._callback[b_fid]).append(function)
+        with self.callback_lock:
+            if b_fid not in self._callback:
+                self._callback[b_fid] = [function]
+            else:
+                # bodge
+                functions = self._callback[b_fid]
+                if functions is None:
+                    functions = [function]
+                else:
+                    functions.append(function)
+                self._callback[b_fid] = functions
 
     def remove_callback(self, fid: bytearray, function) -> None:
         b_fid = bytes(fid)
-        if b_fid not in self._callback:
-            return
+        with self.callback_lock:
+            if b_fid not in self._callback:
+                return
 
-        functions = self._callback[b_fid]
-        if function in functions:
-            functions.remove(function)
-        self._callback[b_fid] = functions
+            functions = self._callback[b_fid]
+            if function in functions:
+                functions.remove(function)
+            print("functions is none: ", functions is None)
+            self._callback[b_fid] = functions
 
     def append_to_feed(
         self, feed: Union[bytearray, struct[FEED]], payload: bytearray
@@ -317,7 +339,7 @@ def get_feed_overview() -> str:
 
     for fid in fids:
         feed = get_feed(fid)
-        if get_parent(feed):
+        if get_parent(feed) is not None:
             continue
         else:
             string_builder.append(to_string(feed))
