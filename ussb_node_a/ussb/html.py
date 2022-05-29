@@ -182,7 +182,8 @@ def get_version_status() -> str:
             continue
 
         # get newest apply version number
-        newest_apply = get_newest_apply(Holder.vm.vc_feed, feed.fid)
+        vf_feed = get_feed(Holder.vm.vc_fid)
+        newest_apply = get_newest_apply(vf_feed, feed.fid)
         # construct graph
         str_graph = string_version_graph(feed, newest_apply)
 
@@ -243,9 +244,12 @@ def get_file_browser() -> str:
         reload("/file_browser"),
         menu,
         subtitle,
-        create_file_link,
-        file_lst,
     ]
+    
+    if Holder.vm.may_update:
+        elements.append(create_file_link)
+
+    elements.append(file_lst)
     return bob_the_page_builder(elements, script=get_file_script)
 
 
@@ -323,8 +327,9 @@ def get_file(file_name: str, version_num: int = -1) -> str:
     assert feed is not None, "failed to get feed"
 
     # check if the version number was specified
-    assert Holder.vm.vc_feed is not None
-    newest_apply = get_newest_apply(Holder.vm.vc_feed, feed.fid)
+    assert Holder.vm.vc_fid is not None
+    vc_feed = get_feed(Holder.vm.vc_fid)
+    newest_apply = get_newest_apply(vc_feed, feed.fid)
     if newest_apply is None:
         newest_apply = 0
     if version_num == -1:
@@ -337,8 +342,11 @@ def get_file(file_name: str, version_num: int = -1) -> str:
 
     # change to correct version if necessary
     if version_num != newest_apply:
-        changes = jump_versions(newest_apply, version_num, feed)
-        content = apply_changes(content, changes)
+        try:
+            changes = jump_versions(newest_apply, version_num, feed)
+            content = apply_changes(content, changes)
+        except Exception:
+            content = "Update blob is not fully available yet."
     # make it html proof
     content = content.replace("<", "&lt")
     # create line numbers
@@ -412,10 +420,13 @@ def get_file(file_name: str, version_num: int = -1) -> str:
         return_link,
         padding,
         version_nums,
-        edit_link,
-        apply_link,
-        code_container,
     ]
+
+    if Holder.vm.may_update:
+        elements.append(edit_link)
+        elements.append(apply_link)
+
+    elements.append(code_container)
     return bob_the_page_builder(elements, script=get_file_script)
 
 
@@ -502,7 +513,8 @@ def get_edit_file(file_name: str, version: int) -> str:
     feed = get_feed(fid)
     assert feed is not None
 
-    newest_apply = get_newest_apply(Holder.vm.vc_feed, fid)
+    vc_feed = get_feed(Holder.vm.vc_fid)
+    newest_apply = get_newest_apply(vc_feed, fid)
     if newest_apply is None:
         newest_apply = 0
     f = open(file_name)

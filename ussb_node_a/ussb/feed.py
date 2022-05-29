@@ -239,6 +239,19 @@ def get_payload(feed: struct[FEED], i: int) -> bytearray:
     return content_array
 
 
+def get_dependency(feed: struct[FEED], i: int) -> Optional[int]:
+    wire_array = get_wire(feed, i)
+
+    # TODO: maybe direct array access?
+    wpkt = struct(addressof(wire_array), WIRE_PACKET, BIG_ENDIAN)
+    if wpkt.type != CHAIN20.to_bytes(1, "big"):
+        # updates are blobs
+        return None
+
+    _, num_bytes = from_var_int(wpkt.payload)
+    return int.from_bytes(wpkt.payload[num_bytes:num_bytes + 4], "big")
+
+
 def save_header(feed: struct[FEED]) -> None:
     f = open(get_header_fn(feed.fid), "wb")
     f.write(bytearray_at(addressof(feed), sizeof(FEED)))
@@ -427,7 +440,11 @@ def verify_and_append_blob(feed: struct[FEED], blob: bytearray) -> bool:
         return False
 
     # save blob file
-    hex_blob = hexlify(blob_hash).digest()
+    hex_blob = hexlify(blob_hash).decode()
+
+    if hex_blob[:2] not in listdir("_blobs"):
+        mkdir("_blobs/{}".format(hex_blob[:2]))
+
     file_name = "_blobs/{}/{}".format(hex_blob[:2], hex_blob[2:])
     f = open(file_name, "wb")
     f.write(blob)
@@ -450,6 +467,7 @@ def get_want(feed: struct[FEED]) -> bytearray:
         want[39:] = (feed.front_seq + 1).to_bytes(4, "big")
         return want
     else:
+        print("want blob in feed: ", hexlify(feed.fid).decode()[:7])
         want = bytearray(63)
         want[:7] = want_dmx
         want[7:39] = feed.fid

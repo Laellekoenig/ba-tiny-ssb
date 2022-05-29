@@ -198,7 +198,8 @@ class FeedManager:
             # blob
             blob_ptr = request[-20:]
             try:
-                f = open("_blobs/{}".format(hexlify(blob_ptr).decode()), "rb")
+                hex_ptr = hexlify(blob_ptr).decode()
+                f = open("_blobs/{}/{}".format(hex_ptr[:2], hex_ptr[2:]), "rb")
                 req_wire[:] = f.read(128)
                 f.close()
             except Exception:
@@ -244,10 +245,14 @@ class FeedManager:
                 self.dmx_table[bytes(next_dmx)] = (self.handle_packet, b_fid)
 
         # callbacks
-        with self.callback_lock:
-            if fid in self._callback:
-                for function in self._callback[fid]:
-                    function(fid)
+        fn_lst = []
+        self.callback_lock.acquire()
+        if fid in self._callback:
+            fn_lst.append(self._callback[fid])
+        self.callback_lock.release()
+
+        for fns in fn_lst:
+            [fn(fid) for fn in fns]
 
     def handle_blob(self, fid: bytearray, blob: bytearray) -> None:
         feed = get_feed(fid)
@@ -263,43 +268,49 @@ class FeedManager:
         next_ptr = waiting_for_blob(feed)
         if not next_ptr:
             with self.dmx_lock:
-                self.dmx_table[get_next_dmx(feed)] = self.handle_packet, fid
+                self.dmx_table[bytes(get_next_dmx(feed))] = self.handle_packet, bytes(fid)
 
-                with self.callback_lock:
-                    if fid in self._callback:
-                        for function in self._callback[fid]:
-                            function(fid)
+                fn_lst = []
+                self.callback_lock.acquire()
+                if fid in self._callback:
+                    fn_lst.append(self._callback[fid])
+                self.callback_lock.release()
 
+                for fns in fn_lst:
+                    [fn(fid) for fn in fns]
                 return
 
         with self.dmx_lock:
-            self.dmx_table[next_ptr] = self.handle_blob, fid
+            self.dmx_table[bytes(next_ptr)] = self.handle_blob, bytes(fid)
 
     def register_callback(self, fid: bytearray, function) -> None:
         b_fid = bytes(fid)
-        with self.callback_lock:
-            if b_fid not in self._callback:
-                self._callback[b_fid] = [function]
+        self.callback_lock.acquire()
+        if b_fid not in self._callback:
+            self._callback[b_fid] = [function]
+        else:
+            # bodge
+            functions = self._callback[b_fid]
+            if functions is None:
+                functions = [function]
             else:
-                # bodge
-                functions = self._callback[b_fid]
-                if functions is None:
-                    functions = [function]
-                else:
-                    functions.append(function)
-                self._callback[b_fid] = functions
+                functions.append(function)
+            self._callback[b_fid] = functions
+        self.callback_lock.release()
 
     def remove_callback(self, fid: bytearray, function) -> None:
         b_fid = bytes(fid)
-        with self.callback_lock:
-            if b_fid not in self._callback:
-                return
+        self.callback_lock.acquire()
+        if b_fid not in self._callback:
+            self.callback_lock.release()
+            return
 
-            functions = self._callback[b_fid]
-            if function in functions:
-                functions.remove(function)
-            print("functions is none: ", functions is None)
-            self._callback[b_fid] = functions
+        functions = self._callback[b_fid]
+        if function in functions:
+            functions.remove(function)
+        print("functions is none: ", functions is None)
+        self._callback[b_fid] = functions
+        self.callback_lock.release()
 
     def append_to_feed(
         self, feed: Union[bytearray, struct[FEED]], payload: bytearray

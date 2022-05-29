@@ -4,6 +4,7 @@ from .feed import (
     add_upd,
     create_child_feed,
     get_children,
+    get_dependency,
     get_feed,
     get_parent,
     get_payload,
@@ -55,10 +56,14 @@ class VersionManager:
         self.update_fid = None
         self.vc_fid = None
         self._load_config()
-        if self.update_fid is None:
-            self.may_update = False
-        elif bytes(self.update_fid) in self.feed_manager.keys:
+        if (
+            self.update_fid is not None
+            and bytes(self.update_fid) in self.feed_manager.keys
+        ):
             self.may_update = True
+        else:
+            self.may_update = False
+        self._register_callbacks()
 
     def __del__(self) -> None:
         self._save_config()
@@ -169,9 +174,8 @@ class VersionManager:
             return
 
         # update feed
-        self.feed_manager.register_callback(
-            self.update_fid, self._update_feed_callback
-        )
+        print("-> registering update feed callback")
+        self.feed_manager.register_callback(self.update_fid, self._update_feed_callback)
 
         # check for version control feed
         children = get_children(get_feed(self.update_fid))
@@ -181,12 +185,14 @@ class VersionManager:
         vc_fid = children[0]
         assert type(vc_fid) is bytearray
 
+        print("-> registering VC feed callback")
         self.feed_manager.register_callback(
             vc_fid, self._vc_feed_callback  # version control feed
         )
 
         # register callbacks on file feeds
         for _, (file_fid, emergency_fid) in self.vc_dict.items():
+            print("-> registering file feed callbacks")
             self.feed_manager.register_callback(file_fid, self._file_feed_callback)
 
             self.feed_manager.register_callback(
@@ -209,9 +215,7 @@ class VersionManager:
                 assert type(vc_fid) is bytearray
                 self.vc_fid = vc_fid
                 # register callback
-                self.feed_manager.register_callback(
-                    self.vc_fid, self._vc_feed_callback
-                )
+                self.feed_manager.register_callback(self.vc_fid, self._vc_feed_callback)
                 return
             else:
                 return  # waiting for version control feed
@@ -221,6 +225,7 @@ class VersionManager:
         assert type(new_fid) is bytearray
         print("registering new file feed callback")
         self.feed_manager.register_callback(new_fid, self._file_feed_callback)
+        print("done registering")
 
     def _vc_feed_callback(self, fid: bytearray) -> None:
         assert self.vc_fid is not None, "version control feed not found"
@@ -760,9 +765,10 @@ def extract_version_graph(
         # assuming that update feeds only contain update blobs after initial 3 entries
         # get dependency of update
         current_feed, minv = access_dict[i]
-        payload = get_payload(current_feed, i - minv + 3)
-        dep_on = int.from_bytes(payload[:4], "big")
-        del payload
+        dep_on = get_dependency(current_feed, i - minv + 3)
+        if dep_on is None:
+            # non CHAIN20 packet type
+            continue
 
         if i in graph:
             graph[i] = graph[i] + [dep_on]
@@ -814,6 +820,7 @@ def get_changes(old_version: str, new_version: str) -> List[Tuple[int, str, str]
         changes.append((line_num, "I", line))
         line_num += 1
 
+    [print(c) for c in changes]
     return changes
 
 

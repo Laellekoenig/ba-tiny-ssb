@@ -322,7 +322,7 @@ def create_chain(
     payload[:vil] = var_int
     payload[vil:28] = content[: 28 - vil]
     # update content length
-    content_len -= 28 - vil
+    content_len -= (28 - vil)
 
     # prepare blob content
     blob_content = bytearray(expected_num_blobs * 100)

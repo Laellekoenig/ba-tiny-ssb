@@ -6,7 +6,7 @@ from .http import run_http
 from .util import listdir
 from .version_manager import VersionManager
 from _thread import start_new_thread, allocate_lock
-from sys import maxsize, platform
+from sys import platform
 from os import urandom
 from json import dumps, loads
 from hashlib import sha256
@@ -99,18 +99,11 @@ class Node:
 
         update_fid = children[1]
         assert type(update_fid) is bytearray
-        print(update_fid)
         self.version_manager.set_update_feed(update_fid)
 
     def _listen(self, sock: socket) -> None:
         while True:
             msg, _ = sock.recvfrom(1024)
-            # if port == own:
-                # continue
-
-            # with self.prev_send_lock:
-                # if msg == self.prev_send:
-                    # continue
             if msg[:8] == bytes(self.this):
                 continue
 
@@ -121,9 +114,8 @@ class Node:
                 print("message too long, discarded")
                 continue
 
-
             # packet request
-            if msg_len == 43:
+            if msg_len == 43 or msg_len == 63:
                 tpl = self.feed_manager.consult_dmx(bytearray(msg[:7]))
                 if tpl:
                     print("received request")
@@ -148,18 +140,21 @@ class Node:
                     with self.queue_lock:
                         self.queue.insert(0, get_want(get_feed(fid)))
                     continue
-                else:
-                    print("not in dmx: ", int.from_bytes(msg[15:16], "big"))
-
-            # FIX: ignore reserved 8B?
-            else:
-                blob_ptr = bytearray(sha256(msg).digest()[:20])
-                # blob
-                tpl = self.feed_manager.consult_dmx(blob_ptr)
-                if tpl: 
-                    print("received blob")
+                
+                hash = bytearray(20)
+                hash[:] = sha256(msg[8:]).digest()[:20]
+                print(hash)
+                tpl = self.feed_manager.consult_dmx(hash)
+                if tpl:
+                    print("blob in dmx")
                     fn, fid = tpl
-                    fn(fid, bytearray(msg))
+                    fn(fid, msg)
+
+                    with self.queue_lock:
+                        self.queue.insert(0, get_want(get_feed(fid)))
+                        continue
+            else:
+                print("received invalid packet")
 
     def _send(self, sock: socket) -> None:
         while True:
