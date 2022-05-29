@@ -6,14 +6,6 @@ import os
 import sys
 
 
-hello_world = 3
-
-s = """
-hello world,
-how are you
-"""
-
-
 def init() -> None:
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()

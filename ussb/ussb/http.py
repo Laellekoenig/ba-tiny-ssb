@@ -130,19 +130,19 @@ def _handle_post(client: socket, request: List[str]) -> None:
         file_name = "_".join(split[:-1])
         del split
 
-        if PYCOM:
-            code = "\n".join(request[12:])
-        else:
-            code = "\n".join(request[15:])
+        req_dict = loads(request[-1])
+        file_name = req_dict["file_name"]
+        v_num = req_dict["version"]
+        changes = req_dict["changes"]
 
         if type(Holder.vm) is not VersionManager:
             client.close()
             return
 
         if emergency:
-            Holder.vm.emergency_update_file(file_name, code, version)
+            Holder.vm.emergency_update_file(file_name, changes, v_num)
         else:
-            Holder.vm.update_file(file_name, code, version)
+            Holder.vm.update_file(file_name, changes, v_num)
 
         page = get_file(file_name, -1)
         client.send(to_response(page))
