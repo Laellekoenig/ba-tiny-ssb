@@ -118,18 +118,7 @@ def _handle_post(client: socket, request: List[str]) -> None:
         client.close()
         return
 
-    emergency = cmd.startswith("/emergency_update")
-    update = cmd.startswith("/update")
-    if emergency or update:
-        # separate command
-        cmd = cmd[len("/emergency_update_") :] if emergency else cmd[len("/update_") :]
-
-        # get update info
-        split = cmd.split("_")
-        version = int(split[-1])
-        file_name = "_".join(split[:-1])
-        del split
-
+    if cmd in ["/update", "/emergency_update"]: 
         req_dict = loads(request[-1])
         file_name = req_dict["file_name"]
         v_num = req_dict["version"]
@@ -139,7 +128,7 @@ def _handle_post(client: socket, request: List[str]) -> None:
             client.close()
             return
 
-        if emergency:
+        if cmd == "/emergency_update":
             Holder.vm.emergency_update_file(file_name, changes, v_num)
         else:
             Holder.vm.update_file(file_name, changes, v_num)

@@ -3,7 +3,7 @@ from .feed_manager import FeedManager
 from .html import Holder as HTMLHolder
 from .http import Holder as HTTPHolder
 from .http import run_http
-from .util import listdir
+from .util import PYCOM, listdir
 from .version_manager import VersionManager
 from _thread import start_new_thread, allocate_lock
 from sys import platform
@@ -181,29 +181,39 @@ class Node:
             sleep(0.5)
 
     def io(self) -> None:
-        # http socket
-        tx = socket(AF_INET, SOCK_DGRAM)
-        tx.bind(getaddrinfo("0.0.0.0", 0)[0][-1])
-
-        start_new_thread(self._send, (tx,))
-
-        rx = socket(AF_INET, SOCK_DGRAM)
-        rx.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        rx.bind(self.group)
-        if platform == "darwin":
-            mreq = bytes([int(i) for i in "224.1.1.1".split(".")]) + bytes(4)
-            rx.setsockopt(0, 12, mreq)
-
-        start_new_thread(self._fill_wants, ())
-
-        if self.http:
-            start_new_thread(self._listen, (rx,))
-
-            print("starting http server...")
-            server_sock = socket(AF_INET, SOCK_STREAM)
-            server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-            server_sock.bind(getaddrinfo("0.0.0.0", 8000)[0][-1])
-            server_sock.listen(1)
-            run_http(server_sock)
+        if PYCOM:
+            if self.http:
+                print("starting http server...")
+                server_sock = socket(AF_INET, SOCK_STREAM)
+                server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+                server_sock.bind(getaddrinfo("0.0.0.0", 80)[0][-1])
+                server_sock.listen(1)
+                run_http(server_sock)
+        
         else:
-            self._listen(rx)
+            # http socket
+            tx = socket(AF_INET, SOCK_DGRAM)
+            tx.bind(getaddrinfo("0.0.0.0", 0)[0][-1])
+
+            start_new_thread(self._send, (tx,))
+
+            rx = socket(AF_INET, SOCK_DGRAM)
+            rx.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+            rx.bind(self.group)
+            if platform == "darwin":
+                mreq = bytes([int(i) for i in "224.1.1.1".split(".")]) + bytes(4)
+                rx.setsockopt(0, 12, mreq)
+
+            start_new_thread(self._fill_wants, ())
+
+            if self.http:
+                start_new_thread(self._listen, (rx,))
+
+                print("starting http server...")
+                server_sock = socket(AF_INET, SOCK_STREAM)
+                server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+                server_sock.bind(getaddrinfo("0.0.0.0", 8000)[0][-1])
+                server_sock.listen(1)
+                run_http(server_sock)
+            else:
+                self._listen(rx)

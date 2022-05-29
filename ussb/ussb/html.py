@@ -1,6 +1,11 @@
 from .feed import get_feed, get_newest_apply, get_upd, length
 from .feed_manager import FeedManager, get_feed_overview
-from .version_manager import VersionManager, string_version_graph, jump_versions, apply_changes
+from .version_manager import (
+    VersionManager,
+    string_version_graph,
+    jump_versions,
+    apply_changes,
+)
 from sys import implementation
 from ubinascii import hexlify
 
@@ -122,6 +127,108 @@ async function getFile(fileName, version) {
 </script>
 """
 
+lcs_script = """
+<script>
+function getChanges(oldV, newV) {
+    if (oldV === newV) return [];
+    mid = extract_lcs(oldV, newV);
+    let changes = [];
+
+    let j = 0;
+    for (let i = 0; i < oldV.length; i++) {
+        if (oldV[i] !== mid[j]) {
+            const sIdx = i;
+            let x = oldV[i];
+            while(++i < oldV.length && oldV[i] !== mid[j]) {
+                x = x.concat(oldV[i]);
+            }
+            changes.push([sIdx, 'D', x]);
+            i -= 1;
+            continue;
+        }
+        j += 1;
+    }
+
+    j = 0;
+    for (let i = 0; i < newV.length; i++) {
+        if (newV[i] !== mid[j]) {
+            const sIdx = i;
+            let x = newV[i];
+            while (++i < newV.length && newV[i] !== mid[j]) {
+                x = x.concat(newV[i]);
+            }
+
+            changes.push([sIdx, 'I', x]);
+            i -= 1;
+            continue;
+        }
+        j += 1;
+    }
+
+    return changes;
+}
+
+function extract_lcs(s1, s2) {
+    mov = lcs_grid(s1, s2);
+    let lcs = "";
+
+    let i = s1.length - 1;
+    let j = s2.length - 1;
+
+    while (i >= 0 && j >= 0) {
+        if (mov[i][j] == 1) {
+            lcs = s1[i] + lcs;
+            i--;
+            j--;
+            continue;
+        }
+        if (mov[i][j] == 0) {
+            j--;
+            continue;
+        }
+        i--;
+    }
+
+    return lcs;
+}
+
+function lcs_grid(s1, s2) {
+    const m = s1.length;
+    const n = s2.length;
+
+    // left = 0, diagonal = 1, up = 2 
+    let mov = new Array(m).fill(-1).map(() => new Array(n).fill(-1));
+    let count = new Array(m).fill(0).map(() => new Array(n).fill(0));
+
+    for (let i = 0; i < m; i++) {
+        for (let j = 0; j < n; j++) {
+            if (s1[i] === s2[j]) {
+                let val = 0;
+                if (i > 0 && j > 0) {
+                    val = count[i - 1][j - 1];
+                }
+                count[i][j] = val + 1;
+                mov[i][j] = 1;
+            } else {
+                let top = 0;
+                if (i > 0) {
+                    top = count[i - 1][j];
+                }
+
+                let left = 0;
+                if (j > 0) {
+                    left = count[i][j - 1];
+                }
+                count[i][j] = top >= left ? top : left;
+                mov[i][j] = top >= left ? 2 : 0;
+            }
+        }
+    }
+    return mov;
+}
+</script>
+"""
+
 # ------------------------------------functions----------------------------------
 def wrap_html(body: str) -> str:
     html = """
@@ -160,6 +267,7 @@ def get_index() -> str:
 
     return bob_the_page_builder(elements)
 
+
 def get_feed_status() -> str:
     elements = [
         title,
@@ -169,6 +277,7 @@ def get_feed_status() -> str:
         "<p> <pre>{}</pre> </p>".format(get_feed_overview()),
     ]
     return bob_the_page_builder(elements)
+
 
 def get_version_status() -> str:
     graphs = []
@@ -246,7 +355,7 @@ def get_file_browser() -> str:
         menu,
         subtitle,
     ]
-    
+
     if Holder.vm.may_update:
         elements.append(create_file_link)
 
@@ -408,9 +517,7 @@ def get_file(file_name: str, version_num: int = -1) -> str:
     return_link = "<a href='javascript:location.reload();'> &lt_back </a>"
 
     subtitle = "<h3 id='version_subtitle'> {} </h3>".format(file_name)
-    padding = (
-        "<div id='pad'></div>"  # adding distance between return link and title
-    )
+    padding = "<div id='pad'></div>"  # adding distance between return link and title
 
     elements = [
         apply_script,
@@ -484,9 +591,7 @@ def get_create_new_file() -> str:
     # html elements
     title = "<h3 id='version_subtitle'> create_new_file </h3>"
     back_btn = "<a href='file_browser'> &lt_back </a>"
-    padding = (
-        "<div id='pad'></div>"  # adding distance between return link and title
-    )
+    padding = "<div id='pad'></div>"  # adding distance between return link and title
     label = "<label> new_file_name: </label>"
     input_field = "<input type='text' id='input'> </input>"
     btn = "<button onclick=create_file()> create_file </button>"
@@ -531,153 +636,57 @@ def get_edit_file(file_name: str, version: int) -> str:
 
     underscore_fn = file_name.replace(".", "_")  # used in links
 
-    script = """<script>
-    // bool emergency: determines how update is sent
-    async function send(emergency) {{
-        text = document.getElementById('code_area').value;
-        old = document.getElementById('hide').textContent;
+    script = """
+{}
+<script>
+// bool emergency: determines how update is sent
+async function send(emergency) {{
+    text = document.getElementById('code_area').value;
+    old = document.getElementById('hide').textContent;
 
-        changes = getChanges(old, text);
+    changes = getChanges(old, text);
 
-        if (emergency) {{
-            // emergency update
-            cmd = '/emergency_update';
-        }} else {{
-            cmd = '/update';
-        }}
-
-        cmd += '_{}_{}'; // file name and version number
-
-        try {{
-            const response = await fetch(cmd, {{
-                method: 'POST',
-                body: JSON.stringify({{
-                    'file_name': '{}',
-                    'version': {},
-                    'changes': changes,
-                }}),
-                headers: {{
-                    'Content-Type': 'application/json'
-                }}
-            }});
-
-            response.text().then(
-                function(html) {{
-                    document.open();
-                    document.write(html);
-                    document.close();
-                    //alert('added_update');
-                    return;
-                }},
-                function(err) {{
-                    alert('update_failed');
-                }}
-            );
-
-        }} catch(err) {{
-            alert('update_failed')
-        }}
+    if (emergency) {{
+        // emergency update
+        cmd = '/emergency_update';
+    }} else {{
+        cmd = '/update';
     }}
 
-    function getChanges(oldV, newV) {{
-        if (oldV === newV) return [];
-        mid = extract_lcs(oldV, newV);
-        let changes = [];
-
-        let j = 0;
-        for (let i = 0; i < oldV.length; i++) {{
-            if (oldV[i] !== mid[j]) {{
-                const sIdx = i;
-                let x = oldV[i];
-                while(++i < oldV.length && oldV[i] !== mid[j]) {{
-                    x = x.concat(oldV[i]);
-                }}
-                changes.push([sIdx, 'D', x]);
-                i -= 1;
-                continue;
+    try {{
+        const response = await fetch(cmd, {{
+            method: 'POST',
+            body: JSON.stringify({{
+                'file_name': '{}',
+                'version': {},
+                'changes': changes,
+            }}),
+            headers: {{
+                'Content-Type': 'application/json'
             }}
-            j += 1;
-        }}
+        }});
 
-        j = 0;
-        for (let i = 0; i < newV.length; i++) {{
-            if (newV[i] !== mid[j]) {{
-                const sIdx = i;
-                let x = newV[i];
-                while (++i < newV.length && newV[i] !== mid[j]) {{
-                    x = x.concat(newV[i]);
-                }}
-
-                changes.push([sIdx, 'I', x]);
-                i -= 1;
-                continue;
+        response.text().then(
+            function(html) {{
+                document.open();
+                document.write(html);
+                document.close();
+                //alert('added_update');
+                return;
+            }},
+            function(err) {{
+                alert('update_failed');
             }}
-            j += 1;
-        }}
+        );
 
-        return changes;
+    }} catch(err) {{
+        alert('update_failed')
     }}
-
-    function extract_lcs(s1, s2) {{
-        mov = lcs_grid(s1, s2);
-        let lcs = "";
-
-        let i = s1.length - 1;
-        let j = s2.length - 1;
-
-        while (i >= 0 && j >= 0) {{
-            if (mov[i][j] == 1) {{
-                lcs = s1[i] + lcs;
-                i--;
-                j--;
-                continue;
-            }}
-            if (mov[i][j] == 0) {{
-                j--;
-                continue;
-            }}
-            i--;
-        }}
-
-        return lcs;
-    }}
-
-    function lcs_grid(s1, s2) {{
-        const m = s1.length;
-        const n = s2.length;
-
-        // left = 0, diagonal = 1, up = 2 
-        let mov = new Array(m).fill(-1).map(() => new Array(n).fill(-1));
-        let count = new Array(m).fill(0).map(() => new Array(n).fill(0));
-
-        for (let i = 0; i < m; i++) {{
-            for (let j = 0; j < n; j++) {{
-                if (s1[i] === s2[j]) {{
-                    let val = 0;
-                    if (i > 0 && j > 0) {{
-                        val = count[i - 1][j - 1];
-                    }}
-                    count[i][j] = val + 1;
-                    mov[i][j] = 1;
-                }} else {{
-                    let top = 0;
-                    if (i > 0) {{
-                        top = count[i - 1][j];
-                    }}
-
-                    let left = 0;
-                    if (j > 0) {{
-                        left = count[i][j - 1];
-                    }}
-                    count[i][j] = top >= left ? top : left;
-                    mov[i][j] = top >= left ? 2 : 0;
-                }}
-            }}
-        }}
-        return mov;
-    }}
-    </script>""".format(
-        file_name, version, file_name, version
+}}
+</script>""".format(
+        lcs_script,
+        file_name,
+        version,
     )
 
     script2 = """<script>
@@ -699,10 +708,8 @@ def get_edit_file(file_name: str, version: int) -> str:
 
     # build html elements
     reload_btn = reload("/edit_{}_{}".format(underscore_fn, version))
-    subtitle = (
-        "<h3 id='version_subtitle'> edit: <i>{}</i> at <i>v{}</i></h3>".format(
-            file_name, version
-        )
+    subtitle = "<h3 id='version_subtitle'> edit: <i>{}</i> at <i>v{}</i></h3>".format(
+        file_name, version
     )
 
     # create editor
@@ -726,9 +733,7 @@ def get_edit_file(file_name: str, version: int) -> str:
     return_link += "&lt_cancel"
     return_link += "</a>"
 
-    padding = (
-        "<div id='pad'></div>"  # adding distance between return link and title
-    )
+    padding = "<div id='pad'></div>"  # adding distance between return link and title
 
     elements = [
         title,

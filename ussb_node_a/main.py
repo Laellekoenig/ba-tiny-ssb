@@ -6,12 +6,7 @@ import os
 import sys
 
 
-first_update = 1
-third_update = 3
-
-
 def init()-> None:
-    bad_update = -1
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
     master_feed = create_feed(mfid)
