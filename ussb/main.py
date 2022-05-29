@@ -6,7 +6,7 @@ import os
 import sys
 
 
-def init() -> None:
+def init()-> None:
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
     master_feed = create_feed(mfid)

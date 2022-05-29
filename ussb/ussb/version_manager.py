@@ -535,7 +535,7 @@ class VersionManager:
         # now add update
         self.update_file(file_name, changes, depends_on)
         # and apply
-        self.add_apply(file_name, maxv + 1)
+        self.add_apply(file_name, -1)  # apply latest update
 
         # update callbacks
         self.feed_manager.remove_callback(emgcy_fid, self._emergency_feed_callback)
@@ -685,7 +685,7 @@ def apply_changes(content: str, changes: List[List]) -> str:
 
 def jump_versions(
     start: int, end: int, feed: struct[FEED]
-) -> List[Tuple[int, str, str]]:
+) -> List[List]:
     if start == end:
         return []  # nothing changes
 
