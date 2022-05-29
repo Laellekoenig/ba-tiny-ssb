@@ -68,7 +68,8 @@ button {margin-top: .5rem;}
                 padding-left: 1.5rem;}
 #index_title {font-size: 3rem;
               margin-left: -.5rem;
-              text-decoration: underline;}}
+              text-decoration: underline;}
+#hide {display: none;}}
 """
 
 title = """
@@ -526,12 +527,17 @@ def get_edit_file(file_name: str, version: int) -> str:
         changes = jump_versions(newest_apply, version, feed)
         code = apply_changes(code, changes)
 
+    old_code = "<div id ='hide'>{}<div>".format(code)
+
     underscore_fn = file_name.replace(".", "_")  # used in links
 
     script = """<script>
     // bool emergency: determines how update is sent
     async function send(emergency) {{
         text = document.getElementById('code_area').value;
+        old = document.getElementById('hide').textContent;
+
+        changes = getChanges(old, text);
 
         if (emergency) {{
             // emergency update
@@ -545,7 +551,11 @@ def get_edit_file(file_name: str, version: int) -> str:
         try {{
             const response = await fetch(cmd, {{
                 method: 'POST',
-                body: text,
+                body: JSON.stringify({{
+                    'file_name': '{}',
+                    'version': {},
+                    'changes': changes,
+                }}),
                 headers: {{
                     'Content-Type': 'application/json'
                 }}
@@ -568,8 +578,106 @@ def get_edit_file(file_name: str, version: int) -> str:
             alert('update_failed')
         }}
     }}
+
+    function getChanges(oldV, newV) {{
+        if (oldV === newV) return [];
+        mid = extract_lcs(oldV, newV);
+        let changes = [];
+
+        let j = 0;
+        for (let i = 0; i < oldV.length; i++) {{
+            if (oldV[i] !== mid[j]) {{
+                const sIdx = i;
+                let x = oldV[i];
+                while(++i < oldV.length && oldV[i] !== mid[j]) {{
+                    x = x.concat(oldV[i]);
+                }}
+                changes.push([sIdx, 'D', x]);
+                i -= 1;
+                continue;
+            }}
+            j += 1;
+        }}
+
+        j = 0;
+        for (let i = 0; i < newV.length; i++) {{
+            if (newV[i] !== mid[j]) {{
+                const sIdx = i;
+                let x = newV[i];
+                while (++i < newV.length && newV[i] !== mid[j]) {{
+                    x = x.concat(newV[i]);
+                }}
+
+                changes.push([sIdx, 'I', x]);
+                i -= 1;
+                continue;
+            }}
+            j += 1;
+        }}
+
+        return changes;
+    }}
+
+    function extract_lcs(s1, s2) {{
+        mov = lcs_grid(s1, s2);
+        let lcs = "";
+
+        let i = s1.length - 1;
+        let j = s2.length - 1;
+
+        while (i >= 0 && j >= 0) {{
+            if (mov[i][j] == 1) {{
+                lcs = s1[i] + lcs;
+                i--;
+                j--;
+                continue;
+            }}
+            if (mov[i][j] == 0) {{
+                j--;
+                continue;
+            }}
+            i--;
+        }}
+
+        return lcs;
+    }}
+
+    function lcs_grid(s1, s2) {{
+        const m = s1.length;
+        const n = s2.length;
+
+        // left = 0, diagonal = 1, up = 2 
+        let mov = new Array(m).fill(-1).map(() => new Array(n).fill(-1));
+        let count = new Array(m).fill(0).map(() => new Array(n).fill(0));
+
+        for (let i = 0; i < m; i++) {{
+            for (let j = 0; j < n; j++) {{
+                if (s1[i] === s2[j]) {{
+                    let val = 0;
+                    if (i > 0 && j > 0) {{
+                        val = count[i - 1][j - 1];
+                    }}
+                    count[i][j] = val + 1;
+                    mov[i][j] = 1;
+                }} else {{
+                    let top = 0;
+                    if (i > 0) {{
+                        top = count[i - 1][j];
+                    }}
+
+                    let left = 0;
+                    if (j > 0) {{
+                        left = count[i][j - 1];
+                    }}
+                    count[i][j] = top >= left ? top : left;
+                    mov[i][j] = top >= left ? 2 : 0;
+                }}
+            }}
+        }}
+        return mov;
+    }}
     </script>""".format(
-        file_name, version
+        file_name, version, file_name, version
     )
 
     script2 = """<script>
@@ -634,6 +742,7 @@ def get_edit_file(file_name: str, version: int) -> str:
         send_btn,
         emergency_btn,
         script2,
+        old_code,
     ]
     return bob_the_page_builder(elements, script=script)
 

@@ -258,7 +258,7 @@ class VersionManager:
             if bytes(b_fid) in self.apply_queue:
                 # check if waiting to apply update
                 seq = self.apply_queue[b_fid]
-                self._apply_update(fid, seq)
+                self._apply_update(fid, seq.to_bytes(4, "big"))
 
         if front_type == MKCHILD.to_bytes(1, "big"):
             # setup of update feed finished, add to version control dictionary
@@ -360,6 +360,12 @@ class VersionManager:
 
         # assuming that only updates are appended
         num_updates = length(file_feed) - 3  # subtract ICH UPD and MKC entries
+        if num_updates <= 0:
+            print("waiting for UPD packet")
+            self.apply_queue[bytes(fid)] = int_seq
+            self._save_config()
+            return
+
         fn_v_tuple = get_upd(file_feed)
         # FIXME: can this lead to an error?
         assert fn_v_tuple is not None

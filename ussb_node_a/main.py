@@ -1,4 +1,4 @@
-from ussb.feed import create_feed, create_child_feed, get_wire
+from ussb.feed import create_feed, create_child_feed
 from ussb.feed_manager import FeedManager
 from ussb.node import Node
 from ussb.util import listdir
@@ -6,10 +6,12 @@ import os
 import sys
 
 
-pls_work=1
+first_update = 1
+third_update = 3
 
 
-def init() -> None:
+def init()-> None:
+    bad_update = -1
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
     master_feed = create_feed(mfid)
@@ -73,18 +75,6 @@ def clean() -> None:
                 os.remove("_feeds/{}".format(file))
         os.rmdir("_feeds")
 
-    if "_blobs" in listdir():
-        for file in listdir("_blobs"):
-            if file.startswith("."):
-                continue
-            for file2 in listdir("_blobs/{}".format(file)):
-                if file2.startswith("."):
-                    continue
-                os.remove("_blobs/{}/{}".format(file, file2))
-
-            os.rmdir("_blobs/{}".format(file))
-        os.rmdir("_blobs")
-
     for file in listdir():
         if file.endswith(".json"):
             os.remove(file)
@@ -97,6 +87,19 @@ def clean() -> None:
         os.rmdir("ROOT_EXPORT/_feeds")
         os.remove("ROOT_EXPORT/node_cfg.json")
         os.rmdir("ROOT_EXPORT")
+
+    # FIXME
+    if "_blobs" in listdir():
+        for file in listdir("_blobs"):
+            if file.startswith("."):
+                continue
+            for file2 in listdir("_blobs/{}".format(file)):
+                if file2.startswith("."):
+                    continue
+                os.remove("_blobs/{}/{}".format(file, file2))
+
+            os.rmdir("_blobs/{}".format(file))
+        os.rmdir("_blobs")
 
 
 def main() -> int:
