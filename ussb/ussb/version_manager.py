@@ -204,8 +204,6 @@ class VersionManager:
         assert self.update_fid == fid, "not called on update feed"
 
         # FIXME: can be removed?
-        print("UPDATE FEED CALLBACK")
-
         children = get_children(get_feed(self.update_fid))
 
         if self.vc_fid is None:
@@ -223,20 +221,16 @@ class VersionManager:
         # new file update feed
         new_fid = children[-1]
         assert type(new_fid) is bytearray
-        print("registering new file feed callback")
         self.feed_manager.register_callback(new_fid, self._file_feed_callback)
-        print("done registering")
 
     def _vc_feed_callback(self, fid: bytearray) -> None:
         assert self.vc_fid is not None, "version control feed not found"
-        print("VC FEED CALLBACK")
 
         front_type = get_wire(get_feed(self.vc_fid), -1)[15:16]
         if front_type == ISCHILD.to_bytes(1, "big"):
             return  # first packet in version control feed -> ignore
 
         if front_type == APPLYUP.to_bytes(1, "big"):
-            print("applying update")
             payload = get_payload(get_feed(self.vc_fid), -1)
             fid, seq = payload[:32], payload[32:36]
             self._apply_update(fid, seq)
@@ -244,7 +238,6 @@ class VersionManager:
     def _file_feed_callback(self, fid: bytearray) -> None:
         feed = get_feed(fid)
         assert feed is not None, "failed to get feed"
-        print("FILE FEED CALLBACK")
 
         if waiting_for_blob(feed) is not None:
             return  # blob not complete
@@ -306,8 +299,6 @@ class VersionManager:
     def _emergency_feed_callback(self, fid: bytearray) -> None:
         feed = get_feed(fid)
         assert feed is not None, "failed to get feed"
-
-        print("EMERGENCY FEED CALLBACK")
 
         if waiting_for_blob(feed) is not None:
             return  # wait for completion of blob
@@ -564,15 +555,24 @@ class VersionManager:
 
 # ------------------------------------UTIL--------------------------------------
 def apply_changes(content: str, changes: List[List]) -> str:
-    for change in changes:
+    ins = [c for c in changes if c[1] == "I"]
+    dels = [c for c in changes if c[1] == "D"]
+    dels.reverse()
+
+    for change in dels:
         idx = change[0]
-        op = change[1]
         string = change[2]
 
-        if op == "I":
-            content = content[:idx] + string + content[idx:]
-        else:
-            content = content[:idx] + content[idx + len(string) :]
+        # delete
+        content = content[:idx] + content[idx + len(string):]
+
+    for change in ins:
+        idx = change[0]
+        string = change[2]
+
+        # insert
+        content = content[:idx] + string + content[idx:]
+
     return content
 
 

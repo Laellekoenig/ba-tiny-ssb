@@ -132,8 +132,12 @@ async function getFile(fileName, version) {
 lcs_script = """
 <script>
 function getChanges(oldV, newV) {
+    console.log("old: " + oldV.replace("\\n", "n") + " len: " + oldV.length);
+    console.log("new: " + newV.replace("\\n", "n") + " len: " + newV.length);
+
     if (oldV === newV) return [];
     mid = extract_lcs(oldV, newV);
+    console.log(mid);
     let changes = [];
 
     let j = 0;
@@ -151,6 +155,9 @@ function getChanges(oldV, newV) {
         j += 1;
     }
 
+    console.log(j);
+    console.log(oldV.length);
+
     j = 0;
     for (let i = 0; i < newV.length; i++) {
         if (newV[i] !== mid[j]) {
@@ -167,6 +174,7 @@ function getChanges(oldV, newV) {
         j += 1;
     }
 
+    console.table(changes);
     return changes;
 }
 
@@ -634,13 +642,19 @@ def get_edit_file(file_name: str, version: int) -> str:
         changes = jump_versions(newest_apply, version, feed)
         code = apply_changes(code, changes)
 
-    old_code = "<div id ='hide'>{}<div>".format(code)
+    old_code = "<div id ='hide'>{}</div>".format(code)
 
     underscore_fn = file_name.replace(".", "_")  # used in links
 
     script = """
 {}
 <script>
+function setText() {{
+    // setup set text to text area
+    let txtArea = document.getElementById("code_area");
+    txtArea.value = document.getElementById("hide").textContent;
+}}
+
 // bool emergency: determines how update is sent
 async function send(emergency) {{
     text = document.getElementById('code_area').value;
@@ -715,10 +729,7 @@ async function send(emergency) {{
     )
 
     # create editor
-    code_area = "<textarea id='code_area' rows=35 cols=80>"
-    code_area += code
-    code_area += "</textarea>"
-
+    code_area = "<textarea id='code_area' rows=35 cols=80></textarea>"
     send_btn = (
         "<a href='javascript:void(0);' onclick='send(false)' class='padding_link'>"
     )
@@ -750,6 +761,7 @@ async function send(emergency) {{
         emergency_btn,
         script2,
         old_code,
+        "<script> setText(); </script>"
     ]
     return bob_the_page_builder(elements, script=script)
 
