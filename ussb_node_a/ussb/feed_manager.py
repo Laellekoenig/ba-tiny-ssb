@@ -185,9 +185,9 @@ class FeedManager:
         req_feed = get_feed(fid)
         req_seq = int.from_bytes(request[39:43], "big")
         # check seq number
-        print("want for: {} at {}".format(hexlify(fid).decode()[:7], req_seq))
+        # print("want for: {} at {}".format(hexlify(fid).decode()[:7], req_seq))
         if req_feed.front_seq < req_seq:
-            print("-packet wire not available")
+            # print("-packet wire not available")
             return None
 
         req_wire = bytearray(128)
@@ -308,7 +308,6 @@ class FeedManager:
         functions = self._callback[b_fid]
         if function in functions:
             functions.remove(function)
-        print("functions is none: ", functions is None)
         self._callback[b_fid] = functions
         self.callback_lock.release()
 

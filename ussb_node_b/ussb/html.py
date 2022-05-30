@@ -463,7 +463,8 @@ def get_file(file_name: str, version_num: int = -1) -> str:
     # change to correct version if necessary
     if version_num != newest_apply:
         try:
-            content = jump_versions(content, newest_apply, version_num, feed)
+            changes = jump_versions(newest_apply, version_num, feed)
+            content = apply_changes(content, changes)
         except Exception:
             content = "Update blob is not fully available yet."
     # make it html proof
@@ -638,7 +639,8 @@ def get_edit_file(file_name: str, version: int) -> str:
 
     if newest_apply != version:
         # get requested version
-        code = jump_versions(code, newest_apply, version, feed)
+        changes = jump_versions(newest_apply, version, feed)
+        code = apply_changes(code, changes)
 
     old_code = "<div id ='hide'>{}</div>".format(code)
 

@@ -7,6 +7,7 @@ import sys
 
 
 def init()-> None:
+    print("fix")
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
     master_feed = create_feed(mfid)

@@ -121,7 +121,7 @@ class Node:
             if msg_len == 43 or msg_len == 63:
                 tpl = self.feed_manager.consult_dmx(bytearray(msg[:7]))
                 if tpl:
-                    print("received request")
+                    # print("received request")
                     fn, fid = tpl
                     if self.viz:
                         self.viz.register_rx(fid)
@@ -135,7 +135,7 @@ class Node:
             elif msg_len == 128:
                 tpl = self.feed_manager.consult_dmx(bytearray(msg[8:15]))
                 if tpl:
-                    print("received packet")
+                    # print("received packet")
                     fn, fid = tpl
                     if self.viz:
                         self.viz.register_rx(fid)
@@ -150,10 +150,8 @@ class Node:
                 
                 hash = bytearray(20)
                 hash[:] = sha256(msg[8:]).digest()[:20]
-                print(hash)
                 tpl = self.feed_manager.consult_dmx(hash)
                 if tpl:
-                    print("blob in dmx")
                     fn, fid = tpl
                     if self.viz:
                         self.viz.register_rx(fid)

@@ -393,7 +393,8 @@ class VersionManager:
             return
 
         # compute changes from update and apply them to file
-        new_content = jump_versions(content, current_apply, int_seq, file_feed)
+        changes = jump_versions(current_apply, int_seq, file_feed)
+        new_content = apply_changes(content, changes)
         del content
 
         f = open(file_name, "w")
@@ -520,8 +521,8 @@ class VersionManager:
 
         # add to version control feed and apply locally
         key = self.feed_manager.keys[bytes(self.vc_fid)]
-        self._apply_update(fid, bytearray(v_num.to_bytes(4, "big")))
         add_apply(get_feed(self.vc_fid), fid, v_num, key)
+        self._apply_update(fid, bytearray(v_num.to_bytes(4, "big")))
 
     def create_new_file(self, file_name: str) -> None:
         assert self.update_fid is not None
@@ -551,10 +552,6 @@ class VersionManager:
         self.apply_dict[file_name] = 0
         self._save_config()
 
-        # update dmx values
-        # FIXME: only add dmx values of new feeds
-        self.feed_manager._fill_dmx()
-
 
 # ------------------------------------UTIL--------------------------------------
 def apply_changes(content: str, changes: List[List]) -> str:
@@ -579,9 +576,9 @@ def apply_changes(content: str, changes: List[List]) -> str:
     return content
 
 
-def jump_versions(content: str, start: int, end: int, feed: struct[FEED]) -> str:
+def jump_versions(start: int, end: int, feed: struct[FEED]) -> List[List]:
     if start == end:
-        return content  # nothing changes
+        return []  # nothing changes
 
     # get dependency graph
     graph, access_dict = extract_version_graph(feed)
@@ -589,7 +586,7 @@ def jump_versions(content: str, start: int, end: int, feed: struct[FEED]) -> str
 
     if start > max_version or end > max_version:
         print("update not available yet")
-        return content
+        return []
 
     # do BFS on graph
     update_path = _bfs(graph, start, end)
@@ -602,6 +599,8 @@ def jump_versions(content: str, start: int, end: int, feed: struct[FEED]) -> str
     mono_inc = lambda lst: all(x < y for x, y in zip(lst, lst[1:]))
     mono_dec = lambda lst: all(x > y for x, y in zip(lst, lst[1:]))
 
+    all_changes = []
+
     if mono_inc(update_path):
         # apply all updates, ignore first
         update_path.pop(0)
@@ -609,7 +608,7 @@ def jump_versions(content: str, start: int, end: int, feed: struct[FEED]) -> str
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            content = apply_changes(content, changes)
+            all_changes += changes
 
     elif mono_dec(update_path):
         # revert all updates, ignore last
@@ -618,7 +617,7 @@ def jump_versions(content: str, start: int, end: int, feed: struct[FEED]) -> str
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            content = apply_changes(content, reverse_changes(changes))
+            all_changes += reverse_changes(changes)
 
     else:
         # first half revert, second half apply
@@ -631,15 +630,15 @@ def jump_versions(content: str, start: int, end: int, feed: struct[FEED]) -> str
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            content = apply_changes(content, reverse_changes(changes))
+            all_changes += reverse_changes(changes)
 
         for step in second_half:
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            content = apply_changes(content, changes)
+            all_changes += changes
 
-    return content
+    return all_changes
 
 
 def _bfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
@@ -704,15 +703,9 @@ def bytes_to_changes(changes: bytearray) -> Tuple[List[List], int]:
 
 
 def reverse_changes(changes: List[List]) -> List[List]:
-    dels = [c for c in changes if c[1] == "D"]
-    ins = [c for c in changes if c[1] == "I"]
-
-    # swap
-    dels = [[c[0], "I", c[2]] for c in dels]
-    ins = [[c[0], "D", c[2]] for c in ins]
-
-
-    return ins + dels
+    changes = [[c[0], "I", c[2]] if c[2] == "D" else [c[0], "D", c[2]] for c in changes]
+    changes.reverse()
+    return changes
 
 
 def extract_version_graph(

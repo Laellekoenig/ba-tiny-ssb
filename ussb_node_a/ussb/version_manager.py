@@ -204,8 +204,6 @@ class VersionManager:
         assert self.update_fid == fid, "not called on update feed"
 
         # FIXME: can be removed?
-        print("UPDATE FEED CALLBACK")
-
         children = get_children(get_feed(self.update_fid))
 
         if self.vc_fid is None:
@@ -223,20 +221,16 @@ class VersionManager:
         # new file update feed
         new_fid = children[-1]
         assert type(new_fid) is bytearray
-        print("registering new file feed callback")
         self.feed_manager.register_callback(new_fid, self._file_feed_callback)
-        print("done registering")
 
     def _vc_feed_callback(self, fid: bytearray) -> None:
         assert self.vc_fid is not None, "version control feed not found"
-        print("VC FEED CALLBACK")
 
         front_type = get_wire(get_feed(self.vc_fid), -1)[15:16]
         if front_type == ISCHILD.to_bytes(1, "big"):
             return  # first packet in version control feed -> ignore
 
         if front_type == APPLYUP.to_bytes(1, "big"):
-            print("applying update")
             payload = get_payload(get_feed(self.vc_fid), -1)
             fid, seq = payload[:32], payload[32:36]
             self._apply_update(fid, seq)
@@ -244,7 +238,6 @@ class VersionManager:
     def _file_feed_callback(self, fid: bytearray) -> None:
         feed = get_feed(fid)
         assert feed is not None, "failed to get feed"
-        print("FILE FEED CALLBACK")
 
         if waiting_for_blob(feed) is not None:
             return  # blob not complete
@@ -306,8 +299,6 @@ class VersionManager:
     def _emergency_feed_callback(self, fid: bytearray) -> None:
         feed = get_feed(fid)
         assert feed is not None, "failed to get feed"
-
-        print("EMERGENCY FEED CALLBACK")
 
         if waiting_for_blob(feed) is not None:
             return  # wait for completion of blob
@@ -402,8 +393,7 @@ class VersionManager:
             return
 
         # compute changes from update and apply them to file
-        changes = jump_versions(current_apply, int_seq, file_feed)
-        new_content = apply_changes(content, changes)
+        new_content = jump_versions(content, current_apply, int_seq, file_feed)
         del content
 
         f = open(file_name, "w")
@@ -530,8 +520,8 @@ class VersionManager:
 
         # add to version control feed and apply locally
         key = self.feed_manager.keys[bytes(self.vc_fid)]
-        add_apply(get_feed(self.vc_fid), fid, v_num, key)
         self._apply_update(fid, bytearray(v_num.to_bytes(4, "big")))
+        add_apply(get_feed(self.vc_fid), fid, v_num, key)
 
     def create_new_file(self, file_name: str) -> None:
         assert self.update_fid is not None
@@ -561,24 +551,37 @@ class VersionManager:
         self.apply_dict[file_name] = 0
         self._save_config()
 
+        # update dmx values
+        # FIXME: only add dmx values of new feeds
+        self.feed_manager._fill_dmx()
+
 
 # ------------------------------------UTIL--------------------------------------
 def apply_changes(content: str, changes: List[List]) -> str:
-    for change in changes:
+    ins = [c for c in changes if c[1] == "I"]
+    dels = [c for c in changes if c[1] == "D"]
+    dels.reverse()
+
+    for change in dels:
         idx = change[0]
-        op = change[1]
         string = change[2]
 
-        if op == "I":
-            content = content[:idx] + string + content[idx:]
-        else:
-            content = content[:idx] + content[idx + len(string) :]
+        # delete
+        content = content[:idx] + content[idx + len(string):]
+
+    for change in ins:
+        idx = change[0]
+        string = change[2]
+
+        # insert
+        content = content[:idx] + string + content[idx:]
+
     return content
 
 
-def jump_versions(start: int, end: int, feed: struct[FEED]) -> List[List]:
+def jump_versions(content: str, start: int, end: int, feed: struct[FEED]) -> str:
     if start == end:
-        return []  # nothing changes
+        return content  # nothing changes
 
     # get dependency graph
     graph, access_dict = extract_version_graph(feed)
@@ -586,7 +589,7 @@ def jump_versions(start: int, end: int, feed: struct[FEED]) -> List[List]:
 
     if start > max_version or end > max_version:
         print("update not available yet")
-        return []
+        return content
 
     # do BFS on graph
     update_path = _bfs(graph, start, end)
@@ -599,8 +602,6 @@ def jump_versions(start: int, end: int, feed: struct[FEED]) -> List[List]:
     mono_inc = lambda lst: all(x < y for x, y in zip(lst, lst[1:]))
     mono_dec = lambda lst: all(x > y for x, y in zip(lst, lst[1:]))
 
-    all_changes = []
-
     if mono_inc(update_path):
         # apply all updates, ignore first
         update_path.pop(0)
@@ -608,7 +609,7 @@ def jump_versions(start: int, end: int, feed: struct[FEED]) -> List[List]:
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            all_changes += changes
+            content = apply_changes(content, changes)
 
     elif mono_dec(update_path):
         # revert all updates, ignore last
@@ -617,7 +618,7 @@ def jump_versions(start: int, end: int, feed: struct[FEED]) -> List[List]:
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            all_changes += reverse_changes(changes)
+            content = apply_changes(content, reverse_changes(changes))
 
     else:
         # first half revert, second half apply
@@ -630,15 +631,15 @@ def jump_versions(start: int, end: int, feed: struct[FEED]) -> List[List]:
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            all_changes += reverse_changes(changes)
+            content = apply_changes(content, reverse_changes(changes))
 
         for step in second_half:
             access_feed, minv = access_dict[step]
             update_payload = get_payload(access_feed, step - minv + 3)
             changes, _ = bytes_to_changes(update_payload)
-            all_changes += changes
+            content = apply_changes(content, changes)
 
-    return all_changes
+    return content
 
 
 def _bfs(graph: Dict[int, List[int]], start: int, end: int) -> List[int]:
@@ -703,9 +704,15 @@ def bytes_to_changes(changes: bytearray) -> Tuple[List[List], int]:
 
 
 def reverse_changes(changes: List[List]) -> List[List]:
-    changes = [[c[0], "I", c[2]] if c[2] == "D" else [c[0], "D", c[2]] for c in changes]
-    changes.reverse()
-    return changes
+    dels = [c for c in changes if c[1] == "D"]
+    ins = [c for c in changes if c[1] == "I"]
+
+    # swap
+    dels = [[c[0], "I", c[2]] for c in dels]
+    ins = [[c[0], "D", c[2]] for c in ins]
+
+
+    return ins + dels
 
 
 def extract_version_graph(

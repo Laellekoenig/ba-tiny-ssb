@@ -45,7 +45,7 @@ PAGE = """
         </div>
         <div id="graph_container">
             <h3 id="tick"> 0 </h3>
-            <canvas id="graph" width=800 height=800> </canvas>
+            <canvas id="graph" width=600 height=600> </canvas>
         </div>
         <div id="legend">
             <ul>
@@ -106,7 +106,7 @@ PAGE = """
             }
 
             // sleep for 1s
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 500));
         }
     }
 
@@ -132,8 +132,8 @@ PAGE = """
             if (tx != undefined && tx[tx.length - 1] > maxTick) maxTick = tx[tx.length - 1];
         }
 
-        const height = 800 / data.fids.length
-        const stepSize = 800 / maxTick;
+        const height = canvas.height / data.fids.length
+        const stepSize = canvas.width / maxTick;
 
         // draw blocks
         for (let i = 0; i < data.fids.length; i++) {

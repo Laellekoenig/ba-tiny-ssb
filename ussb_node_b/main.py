@@ -5,26 +5,7 @@ from ussb.util import listdir
 import os
 import sys
 
-
-def init()-> None:
-    print("fix")
-    fm = FeedManager()
-    mkey, mfid = fm.generate_keypair()
-    master_feed = create_feed(mfid)
-
-    ckey, cfid = fm.generate_keypair()
-    _ = create_child_feed(master_feed, mkey, cfid, ckey)
-
-    ukey, ufid = fm.generate_keypair()
-    update_feed = create_child_feed(master_feed, mkey, ufid, ukey)
-
-    vkey, vfid = fm.generate_keypair()
-    _ = create_child_feed(update_feed, ukey, vfid, vkey)
-
-    n = Node()
-    n.set_master_feed(master_feed)
-
-
+keb  hftvsr_fee1d)
 def init_and_export() -> None:
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
