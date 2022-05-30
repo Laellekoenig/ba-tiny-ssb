@@ -5,6 +5,7 @@ from .http import Holder as HTTPHolder
 from .http import run_http
 from .util import PYCOM, listdir
 from .version_manager import VersionManager
+from .visualizer import Visualizer
 from _thread import start_new_thread, allocate_lock
 from sys import platform
 from os import urandom
@@ -37,6 +38,7 @@ class Node:
         "prev_send",
         "prev_send_lock",
         "this",
+        "viz",
     )
 
     def __init__(self, enable_http: bool = False) -> None:
@@ -54,6 +56,7 @@ class Node:
         HTTPHolder.vm = self.version_manager
         HTMLHolder.vm = self.version_manager
         self.this = urandom(8)
+        self.viz = None
 
     def __del__(self) -> None:
         self._save_config()
@@ -120,6 +123,8 @@ class Node:
                 if tpl:
                     print("received request")
                     fn, fid = tpl
+                    if self.viz:
+                        self.viz.register_rx(fid)
                     req_wire = fn(fid, msg)
                     with self.queue_lock:
                         if req_wire is not None:
@@ -132,6 +137,8 @@ class Node:
                 if tpl:
                     print("received packet")
                     fn, fid = tpl
+                    if self.viz:
+                        self.viz.register_rx(fid)
                     fn(fid, msg)
 
                     if not self.version_manager.is_configured():
@@ -148,6 +155,8 @@ class Node:
                 if tpl:
                     print("blob in dmx")
                     fn, fid = tpl
+                    if self.viz:
+                        self.viz.register_rx(fid)
                     fn(fid, msg)
 
                     with self.queue_lock:
@@ -161,6 +170,15 @@ class Node:
             with self.queue_lock:
                 if self.queue:
                     msg = self.queue.pop(0)
+                    if self.viz:
+                        tpl = self.feed_manager.consult_dmx(msg[:7])
+                        if tpl:
+                            _, fid = tpl
+                            self.viz.register_tx(fid)
+                        tpl = self.feed_manager.consult_dmx(msg[8:15])
+                        if tpl:
+                            _, fid = tpl
+                            self.viz.register_tx(fid)
                     try:
                         sock.sendto(self.this + msg, self.group)
                     except:
@@ -191,6 +209,9 @@ class Node:
                 run_http(server_sock)
         
         else:
+            viz = Visualizer()  # not on pycom
+            self.viz = viz
+
             # http socket
             tx = socket(AF_INET, SOCK_DGRAM)
             tx.bind(getaddrinfo("0.0.0.0", 0)[0][-1])
@@ -208,12 +229,20 @@ class Node:
 
             if self.http:
                 start_new_thread(self._listen, (rx,))
-
                 print("starting http server...")
                 server_sock = socket(AF_INET, SOCK_STREAM)
                 server_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-                server_sock.bind(getaddrinfo("0.0.0.0", 8000)[0][-1])
+
+                port = 8000
+                while True:
+                    try:
+                        server_sock.bind(getaddrinfo("0.0.0.0", port)[0][-1])
+                        print("http server open on port {}".format(port))
+                        break
+                    except Exception:
+                        port += 1
+
                 server_sock.listen(1)
-                run_http(server_sock)
+                run_http(server_sock, viz=viz)
             else:
                 self._listen(rx)

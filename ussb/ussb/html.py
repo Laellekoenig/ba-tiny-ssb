@@ -83,6 +83,8 @@ title = """
 
 menu = """
 <div id='menu'>
+    <a href='viz' class='menu_item'> visualizer </a>
+    <br>
     <a href='feed_status' class='menu_item'> feed_status </a>
     <br>
     <a href='version_status' class='menu_item'> version_status </a>

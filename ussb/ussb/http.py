@@ -10,6 +10,7 @@ from .html import (
 from .html import get_index
 from .util import PYCOM
 from .version_manager import VersionManager
+from .visualizer import Visualizer
 from json import loads
 from sys import implementation
 from usocket import socket
@@ -17,7 +18,7 @@ from usocket import socket
 
 # helps with debugging in vim
 if implementation.name != "micropython":
-    from typing import List
+    from typing import List, Optional
 
 
 # bodge
@@ -29,7 +30,7 @@ class Holder:
 to_response = lambda x: "HTTP/1.0 200 OK\n\n{}".format(x).encode()
 
 
-def run_http(sock: socket) -> None:
+def run_http(sock: socket, viz: Optional[Visualizer]=None) -> None:
     while True:
         client, _ = sock.accept()
         msg = client.recv(4096)
@@ -41,14 +42,14 @@ def run_http(sock: socket) -> None:
         request = msg.decode("utf-8").split("\n")
 
         if "POST" in request[0]:
-            _handle_post(client, request)
+            _handle_post(client, request, viz=viz)
         elif "GET" in request[0]:
-            _handle_get(client, request)
+            _handle_get(client, request, viz=viz)
         else:
             client.close()
 
 
-def _handle_get(client: socket, request: List[str]) -> None:
+def _handle_get(client: socket, request: List[str], viz: Optional[Visualizer]=None) -> None:
     cmd = request[0].split(" ")[1]
     del request
 
@@ -69,6 +70,15 @@ def _handle_get(client: socket, request: List[str]) -> None:
     if cmd == "/create_new_file":
         page = get_create_new_file()
 
+    if cmd == "/viz":
+        if viz:
+            page = viz.get_index()
+
+    if cmd == "/viz-reset":
+        if viz:
+            viz.reset()
+            page = viz.get_index()
+
     if page is None:
         page = get_404()
 
@@ -77,7 +87,7 @@ def _handle_get(client: socket, request: List[str]) -> None:
     client.close()
 
 
-def _handle_post(client: socket, request: List[str]) -> None:
+def _handle_post(client: socket, request: List[str], viz: OPTIONAL[Visualizer]=None) -> None:
     cmd = request[0].split(" ")[1]
 
     if cmd in ["/new_file", "/file", "/apply", "/edit"]:
@@ -137,6 +147,12 @@ def _handle_post(client: socket, request: List[str]) -> None:
         client.send(to_response(page))
         client.close()
         return
+
+    if cmd == "/viz":
+        if viz:
+            client.send(to_response(viz.get_data()))
+            client.close()
+            return
 
     p_404 = None
     client.send(to_response(p_404))
