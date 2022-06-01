@@ -1,10 +1,9 @@
 from .feed import get_feed, get_newest_apply, get_upd, length
-from .feed_manager import FeedManager, get_feed_overview
+from .feed_manager import get_feed_overview
 from .version_manager import (
     VersionManager,
-    string_version_graph,
     jump_versions,
-    apply_changes,
+    string_version_graph,
 )
 from sys import implementation
 from ubinascii import hexlify
@@ -12,75 +11,80 @@ from ubinascii import hexlify
 
 # helps with debugging in vim
 if implementation.name != "micropython":
-    # from typing import List
     from typing import List, Optional
 
 
-# bodge
+# bodge for fixing circular imports
 class Holder:
     vm = None
 
 
 # -----------------------------------HTML/CSS-----------------------------------
+# style sheet of web GUI
 style = """
-body {padding: 2rem;
-      margin: 0;}
-p {font-family: monospace;}
-a {font-family: monospace;}
-#title {cursor: pointer;
-        text-decoration: underline;
-        margin-top: -1rem;}
-#menu {display: flex;
-       flex-direction: row;}
-.menu_item {margin-right: 1rem;}
-#reload {position: fixed;
-         top: 3rem;
-         right: 2rem;}
-#code {border: 1px solid black;
-       border-left: 0px;
-       padding: .5rem .5rem .5rem 1rem;
-       min-width: 50%;}
-#code_container {display: flex;
-                 flex-direction: row;}
-#line_nums {border: 1px solid black;
-            border-right: 0px;
-            color: grey;
-            padding: .5rem 0 .5rem .5rem}
-.graph {border-bottom: 1px solid black;}
-button {margin-top: .5rem;}
-.v_num {margin-right: .5rem;}
-.padding_link {padding-right: .5rem;}
-#code_area {min-width: 50%;}
-.ital {font-stlye: italic;}
-#version_subtitle {margin-bottom: 0;}
-#pad {height: 1rem;}
-#current_version {text-decoration: underline black;
-                  font-weight: bold;}
-#index_container {width: calc(100vw - 4rem);
-                  height: calc(100vh - 4rem);
-                  display: flex;
-                  flex-direction: column;
-                  justify-content: center;
-                  align-items: center;}
-#index_aligner a {padding-left: .5rem;
-                  padding-right: .5rem;}
-#index_aligner {display: flex;
-                flex-direction: column;
-                justify-content: start;
-                align-items: center;
-                margin-bottom: 15vh;
-                padding: 1rem;
-                padding-left: 1.5rem;}
-#index_title {font-size: 3rem;
-              margin-left: -.5rem;
-              text-decoration: underline;}
-#hide {display: none;}}
+a       {font-family: monospace;}
+body    {padding: 2rem;
+         margin: 0;}
+button  {margin-top: .5rem;}
+p       {font-family: monospace;}
+
+.graph          {border-bottom: 1px solid black;}
+.ital           {font-stlye: italic;}
+.menu_item      {margin-right: 1rem;}
+.padding_link   {padding-right: .5rem;}
+.v_num          {margin-right: .5rem;}
+
+#code_area          {min-width: 50%;
+                     height: 70vh;}
+#code               {border: 1px solid black;
+                     border-left: 0px;
+                     padding: .5rem .5rem .5rem 1rem;
+                     min-width: 50%;}
+#code_container     {display: flex;
+                     flex-direction: row;}
+#current_version    {text-decoration: underline black;
+                     font-weight: bold;}
+#hide               {display: none;}
+#index_aligner      {display: flex;
+                     flex-direction: column;
+                     justify-content: start;
+                     align-items: center;
+                     margin-bottom: 15vh;
+                     padding: 1rem;
+                     padding-left: 1.5rem;}
+#index_aligner a    {padding-left: .5rem;
+                     padding-right: .5rem;}
+#index_container    {width: calc(100vw - 4rem);
+                     height: calc(100vh - 4rem);
+                     display: flex;
+                     flex-direction: column;
+                     justify-content: center;
+                     align-items: center;}
+#index_title        {font-size: 3rem;
+                     margin-left: -.5rem;
+                     text-decoration: underline;}
+#line_nums          {border: 1px solid black;
+                     border-right: 0px;
+                     color: grey;
+                     padding: .5rem 0 .5rem .5rem}
+#menu               {display: flex;
+                     flex-direction: row;}
+#pad                {height: 1rem;}
+#reload             {position: fixed;
+                     top: 3rem;
+                     right: 2rem;}
+#title              {cursor: pointer;
+                     text-decoration: underline;
+                     margin-top: -1rem;}
+#version_subtitle   {margin-bottom: 0;}
 """
 
+# main title, displayed on every page
 title = """
 <h1 onclick='javascript:window.open("/", "_self");' id='title'>tinyssb</h1>
 """
 
+# main menu, displayed on every page
 menu = """
 <div id='menu'>
     <a href='viz' class='menu_item'> visualizer </a>
@@ -93,13 +97,17 @@ menu = """
 </div>
 """
 
+# creates a reload button containing the given link as href
 reload = lambda x: "<a href='{}' id='reload'> reload </a>".format(x)
 
 # ----------------------------------JavaScript----------------------------------
+# requests the given file name and version from the http server
+# version number -1 -> currently applied version
 get_file_script = """
 <script>
 async function getFile(fileName, version) {
     try {
+        // send request
         const response = await fetch('/file', {
             method: 'POST',
             body: JSON.stringify({
@@ -111,14 +119,13 @@ async function getFile(fileName, version) {
             }
         });
 
+        // replace current page with response
         response.text().then(
             function(html) {
-                //overwrite page
                 document.open();
                 document.write(html);
                 document.close();
-            },
-            function(err) {alert('failed_to_get_file'); return;}
+            }
         );
 
         return;
@@ -129,20 +136,31 @@ async function getFile(fileName, version) {
 </script>
 """
 
+# longest common substring (LCS) algorithm implementation
+# used as a diff algorithm - compute insert and delete operations of update
+# first the lcs between two versions is calculated
+# the resulting lcs string is compared with the original version
+# -> compute needed delete operations
+# then the lcs string is compared to the updated version
+# -> compute needed insert operations
+# these changes are encoded as lists:
+# [index_in_string, operation(D/I), inserted/removed string]
 lcs_script = """
 <script>
 function getChanges(oldV, newV) {
-    console.log("old: " + oldV.replace("\\n", "n") + " len: " + oldV.length);
-    console.log("new: " + newV.replace("\\n", "n") + " len: " + newV.length);
-
     if (oldV === newV) return [];
+
+    // get lcs string
     mid = extract_lcs(oldV, newV);
-    console.log(mid);
+
+    // compute insert/delete operations
     let changes = [];
 
+    // start with delete operations -> difference to original
     let j = 0;
     for (let i = 0; i < oldV.length; i++) {
         if (oldV[i] !== mid[j]) {
+            // check for consecutive deletions
             const sIdx = i;
             let x = oldV[i];
             while(++i < oldV.length && oldV[i] !== mid[j]) {
@@ -155,12 +173,12 @@ function getChanges(oldV, newV) {
         j += 1;
     }
 
-    console.log(j);
-    console.log(oldV.length);
 
+    // compute insert operations -> difference to update
     j = 0;
     for (let i = 0; i < newV.length; i++) {
         if (newV[i] !== mid[j]) {
+            // check for consecutive insertions
             const sIdx = i;
             let x = newV[i];
             while (++i < newV.length && newV[i] !== mid[j]) {
@@ -174,14 +192,18 @@ function getChanges(oldV, newV) {
         j += 1;
     }
 
-    console.table(changes);
     return changes;
 }
 
 function extract_lcs(s1, s2) {
+    // computes the lcs of two given strings
+
+    // get grid
     mov = lcs_grid(s1, s2);
     let lcs = "";
 
+    // "walk" through grid
+    // 0 -> left, 1 -> diagonal, 2 -> up
     let i = s1.length - 1;
     let j = s2.length - 1;
 
@@ -203,6 +225,7 @@ function extract_lcs(s1, s2) {
 }
 
 function lcs_grid(s1, s2) {
+    // computes the lcs grid of two strings
     const m = s1.length;
     const n = s2.length;
 
@@ -241,6 +264,9 @@ function lcs_grid(s1, s2) {
 
 # ------------------------------------functions----------------------------------
 def wrap_html(body: str) -> str:
+    """
+    Adds header and style sheet to given body and wraps everything in HTML tags.
+    """
     html = """
     <!DOCTYPE html>
     <html>
@@ -258,6 +284,11 @@ def wrap_html(body: str) -> str:
 
 
 def bob_the_page_builder(elements: List[str], script: Optional[str] = None) -> str:
+    """
+    Constructs a full HTML page from given list of HTML elements (placed in body).
+    If provided, also adds javascript code (must be wrapped in <script> tags)
+    above body.
+    """
     if script:
         body = "\n".join([script, "<body>"] + elements + ["</body>"])
     else:
@@ -266,6 +297,9 @@ def bob_the_page_builder(elements: List[str], script: Optional[str] = None) -> s
 
 
 def get_index() -> str:
+    """
+    Returns the main page.
+    """
     elements = [
         "<div id='index_container'>",
         "<div id='index_aligner'>",
@@ -279,6 +313,9 @@ def get_index() -> str:
 
 
 def get_feed_status() -> str:
+    """
+    Returns a visualization of all local feeds.
+    """
     elements = [
         title,
         reload("/feed_status"),
@@ -290,10 +327,15 @@ def get_feed_status() -> str:
 
 
 def get_version_status() -> str:
+    """
+    Returns a visualization of all files that are currently monitored by the
+    version manager. Also displays their individual update trees.
+    """
     graphs = []
     if type(Holder.vm) is not VersionManager:
-        return ""
+        return get_404()
 
+    # go over every monitored file
     for file_name in Holder.vm.vc_dict:
         # get corresponding update feed
         fid, _ = Holder.vm.vc_dict[file_name]
@@ -320,7 +362,7 @@ def get_version_status() -> str:
         # add to list
         graphs.append(graph_title + str_graph + "\n")
 
-    # connect all graphs in one string
+    # connect all graphs into single string
     html_graph = ""
     for graph in graphs:
         html_graph += "<p> <pre class='graph'>{}</pre> <p>".format(graph)
@@ -339,10 +381,14 @@ def get_version_status() -> str:
 
 
 def get_file_browser() -> str:
-    # construct file selector
+    """
+    Returns a visualization of all monitored files without their version trees
+    (faster, especially on pycom devices). Also allows user to create new files.
+    """
     if type(Holder.vm) is not VersionManager:
-        return ""
+        return get_404()
 
+    # construct file selector
     file_lst = "<ul>\n"
     for file_name in Holder.vm.vc_dict:
         file_lst += """<li>
@@ -374,12 +420,17 @@ def get_file_browser() -> str:
 
 
 def get_file(file_name: str, version_num: int = -1) -> str:
+    """
+    Returns a visualization of the requested file and version.
+    On the master node, updates may be applied and files edited.
+    """
     if type(Holder.vm) is not VersionManager:
-        return ""
+        return get_404()
 
     apply_script = """<script>
     async function applyUpdate(file_name, version) {
         try {
+            // send apply request to server
             const response = await fetch('/apply', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -391,16 +442,12 @@ def get_file(file_name: str, version_num: int = -1) -> str:
                 }
             });
 
+            // replace current page with response
             response.text().then(
                 function(html) {
-                    //alert('applied_update');
                     document.open();
                     document.write(html);
                     document.close();
-                    return;
-                },
-                function(err) {
-                    alert('failed_to_apply_update');
                 }
             );
         } catch (err) {
@@ -410,6 +457,7 @@ def get_file(file_name: str, version_num: int = -1) -> str:
 
     async function editFile(file_name, version) {
         try {
+            // request editor of current file and version
             const response = await fetch('/edit', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -421,17 +469,12 @@ def get_file(file_name: str, version_num: int = -1) -> str:
                 }
             });
 
+            // replace current page with editor
             response.text().then(
                 function(html) {
-                    // overwrite page
                     document.open();
                     document.write(html);
                     document.close();
-                },
-
-                function(err) {
-                    alert('failed_to_get_file_editor');
-                    return;
                 }
             );
 
@@ -462,15 +505,18 @@ def get_file(file_name: str, version_num: int = -1) -> str:
 
     # change to correct version if necessary
     if version_num != newest_apply:
+        # FIXME: error handling in jump versions instead
         try:
             content = jump_versions(content, newest_apply, version_num, feed)
         except Exception:
             content = "Update blob is not fully available yet."
-    # make it html proof
+
+    # make content HTML proof
     content = content.replace("<", "&lt")
+
     # create line numbers
     line_nums = "<br>".join([str(x) for x in range(1, content.count("\n") + 2)])
-    # html display
+    # display code
     code_container = """<div id="code_container">
                           <p id='line_nums'> {} <p>
                           <p> <pre id='code'>{}</pre> </p>
@@ -482,9 +528,12 @@ def get_file(file_name: str, version_num: int = -1) -> str:
     fn_v_tuple = get_upd(feed)
     assert fn_v_tuple is not None
     _, minv = fn_v_tuple
-    max_v = minv + length(feed) - 3
+    max_v = (
+        minv + length(feed) - 3
+    )  # assuming that is correctly formatted file update feed
     max_v = 0 if max_v is None else max_v
-    # construct html element
+
+    # add buttons for switching file versions
     version_nums = [
         """<a href='javascript:void(0);'
               onclick='getFile(\"{}\", {})'
@@ -513,7 +562,7 @@ def get_file(file_name: str, version_num: int = -1) -> str:
     else:
         apply_link = "<a></a>"
 
-    # link to editing page
+    # link to file editor
     edit_link = """<a href='javascript:void(0);'
                       onclick='editFile(\"{}\", {})'
                       class='padding_link'>
@@ -531,7 +580,7 @@ def get_file(file_name: str, version_num: int = -1) -> str:
     elements = [
         apply_script,
         title,
-        reload("/get_file_{}".format(file_name)),
+        # FIXME: reload button to file
         menu,
         subtitle,
         return_link,
@@ -539,6 +588,7 @@ def get_file(file_name: str, version_num: int = -1) -> str:
         version_nums,
     ]
 
+    # only allow edits and update applications on master
     if Holder.vm.may_update:
         elements.append(edit_link)
         elements.append(apply_link)
@@ -548,8 +598,12 @@ def get_file(file_name: str, version_num: int = -1) -> str:
 
 
 def get_create_new_file() -> str:
+    """
+    Returns the page for creating new files.
+    """
     script = """<script>
     async function create_file() {
+        // get name of new file
         input = document.getElementById('input').value;
 
         // check if input is valid
@@ -567,6 +621,7 @@ def get_create_new_file() -> str:
         }
 
         try {
+            // send request to server
             const response = await fetch("/new_file", {
                 method: "POST",
                 body: JSON.stringify({
@@ -577,18 +632,14 @@ def get_create_new_file() -> str:
                 }
             });
 
+            // open newly created file
             response.text().then(
                 function(html) {
                     document.open();
                     document.write(html);
                     document.close();
                     return;
-                },
-
-                function(err) {
-                    alert('create_file_failed');
                 }
-
             );
 
         } catch (err) {
@@ -621,53 +672,62 @@ def get_create_new_file() -> str:
 
 
 def get_edit_file(file_name: str, version: int) -> str:
+    """
+    Returns the file editor for the given file name and version.
+    """
     if not type(Holder.vm) is VersionManager:
-        return ""
+        return get_404()
 
+    # get corresponding feed
     fid = Holder.vm.vc_dict[file_name][0]
     feed = get_feed(fid)
     assert feed is not None
 
+    # get currently applied version number
     vc_feed = get_feed(Holder.vm.vc_fid)
     newest_apply = get_newest_apply(vc_feed, fid)
     if newest_apply is None:
-        newest_apply = 0
+        newest_apply = 0  # nothing applied yet
+
+    # read file
     f = open(file_name)
     code = f.read()
     f.close()
 
+    # get requested version
     if newest_apply != version:
-        # get requested version
         code = jump_versions(code, newest_apply, version, feed)
 
+    # code is set to hidden div element
+    # this is for fixing issues with directly setting text to TextArea element
     old_code = "<div id ='hide'>{}</div>".format(code)
-
-    underscore_fn = file_name.replace(".", "_")  # used in links
 
     script = """
 {}
 <script>
 function setText() {{
-    // setup set text to text area
+    // setup set text to text area, fixes issues with TextArea
     let txtArea = document.getElementById("code_area");
     txtArea.value = document.getElementById("hide").textContent;
 }}
 
-// bool emergency: determines how update is sent
 async function send(emergency) {{
+    // computes the changes between two versions and sends them to server
+    // this is done using lcs (defined above)
+    // bool emergency: determines how update is sent
+
     text = document.getElementById('code_area').value;
     old = document.getElementById('hide').textContent;
-
     changes = getChanges(old, text);
 
     if (emergency) {{
-        // emergency update
         cmd = '/emergency_update';
     }} else {{
         cmd = '/update';
     }}
 
     try {{
+        // send request to server
         const response = await fetch(cmd, {{
             method: 'POST',
             body: JSON.stringify({{
@@ -680,16 +740,13 @@ async function send(emergency) {{
             }}
         }});
 
+        // replace editor with file view
         response.text().then(
             function(html) {{
                 document.open();
                 document.write(html);
                 document.close();
-                //alert('added_update');
                 return;
-            }},
-            function(err) {{
-                alert('update_failed');
             }}
         );
 
@@ -705,11 +762,13 @@ async function send(emergency) {{
 
     script2 = """<script>
     document.getElementById('code_area').addEventListener('keydown', function(e) {
+        // tabs do not swicth focus, enter 4 spaces in text area
         if (e.key == 'Tab') {
             e.preventDefault();
             const start = this.selectionStart;
             const end = this.selectionEnd;
 
+            // insert 4 spaces
             this.value = this.value.substring(0, start)
                 + '   ' 
                 + this.value.substring(end);
@@ -721,13 +780,13 @@ async function send(emergency) {{
     """
 
     # build html elements
-    reload_btn = reload("/edit_{}_{}".format(underscore_fn, version))
+    reload_btn = reload("javascript:setText();")
     subtitle = "<h3 id='version_subtitle'> edit: <i>{}</i> at <i>v{}</i></h3>".format(
         file_name, version
     )
 
     # create editor
-    code_area = "<textarea id='code_area' rows=35 cols=80></textarea>"
+    code_area = "<textarea id='code_area' cols=80></textarea>"
     send_btn = (
         "<a href='javascript:void(0);' onclick='send(false)' class='padding_link'>"
     )
@@ -753,18 +812,21 @@ async function send(emergency) {{
         subtitle,
         return_link,
         padding,
-        code_area,
-        "<br>",
         send_btn,
         emergency_btn,
+        padding,
+        code_area,
         script2,
         old_code,
-        "<script> setText(); </script>"
+        "<script> setText(); </script>",
     ]
     return bob_the_page_builder(elements, script=script)
 
 
 def get_404() -> str:
+    """
+    Returns the page containing the "file not found" error message.
+    """
     subtitle = "<h3> page_not_found </h3>"
     elements = [title, reload("."), menu, subtitle]
     return bob_the_page_builder(elements)

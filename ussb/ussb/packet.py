@@ -1,9 +1,8 @@
+from .util import PYCOM, to_var_int
 from math import ceil
 from micropython import const
 from pure25519 import VerifyingKey, SigningKey
-from sys import byteorder
-from ubinascii import hexlify
-from sys import implementation
+from sys import byteorder, implementation
 from uctypes import (
     ARRAY,
     BIG_ENDIAN,
@@ -17,44 +16,9 @@ from uctypes import (
 from uhashlib import sha256
 
 
-# helps debugging in vim
+# helps with debugging in vim
 if implementation.name != "micropython":
     from typing import Optional, Tuple, List
-
-
-def to_var_int(i: int) -> bytearray:
-    assert i >= 0, "var int must be positive"
-    if i <= 252:
-        return bytearray([i])
-    if i <= 0xFFFF:
-        arr = bytearray(3)
-        arr[0] = 0xFD
-        arr[1:] = i.to_bytes(2, "little")
-        return arr
-    if i <= 0xFFFFFFFF:
-        arr = bytearray(5)
-        arr[0] = 0xFE
-        arr[1:] = i.to_bytes(4, "little")
-        return arr
-    arr = bytearray(9)
-    arr[0] = 0xFF
-    arr[1:] = i.to_bytes(8, "little")
-    return arr
-
-
-def from_var_int(b: bytearray) -> Tuple[int, int]:
-    assert len(b) >= 1
-    head = b[0]
-    if head <= 252:
-        return (head, 1)
-    assert len(b) >= 3
-    if head == 0xFD:
-        return (int.from_bytes(b[1:3], "little"), 3)
-    assert len(b) >= 5
-    if head == 0xFE:
-        return (int.from_bytes(b[1:5], "little"), 5)
-    assert len(b) >= 9
-    return int.from_bytes(b[1:9], "little"), 9
 
 
 # packet types
@@ -64,10 +28,10 @@ ISCHILD = const(0x02)
 ISCONTN = const(0x03)
 MKCHILD = const(0x04)
 CONTDAS = const(0x05)
-# ACKNLDG POC4
+ACKNLDG = const(0x06)
 UPDFILE = const(0x07)
 APPLYUP = const(0x08)
-FKTREE = const(0x09)
+FOKTREE = const(0x09)
 SESTREE = const(0x10)
 PKTFORK = const(0x11)
 
@@ -75,7 +39,7 @@ PKTFORK = const(0x11)
 PKT_PREFIX = bytearray(b"tiny-v02")
 
 
-# STRUCT definitions
+# struct definitions
 WIRE_PACKET = {
     "reserved": (0 | ARRAY, 8 | UINT8),
     "dmx": (8 | ARRAY, 7 | UINT8),
@@ -101,7 +65,7 @@ BLOB = {
 }
 
 
-# STRUCT methods
+# struct methods
 def new_packet(
     fid: bytearray,
     seq: bytearray,
@@ -110,12 +74,18 @@ def new_packet(
     pkt_type: bytearray,
     key: bytearray,
 ) -> struct[PACKET]:
+    """
+    Creates an instance of the PACKET struct for the given data.
+    The packet consists of a WIRE_PACKET (pointer) and the 'virtual' information.
+    It is signed using pure25519 with the given key.
+    """
     assert len(fid) == 32
     assert len(seq) == 4
     assert len(prev_mid) == 20
     assert len(payload) == 48
     assert len(pkt_type) == 1
     assert len(key) == 32
+
     # create wire packet
     wpkt = struct(addressof(bytearray(sizeof(WIRE_PACKET))), WIRE_PACKET, BIG_ENDIAN)
     wpkt.reserved[:] = PKT_PREFIX
@@ -130,15 +100,15 @@ def new_packet(
     pkt.seq[:] = seq
     pkt.prev_mid[:] = prev_mid
 
-    # calculate block name
+    # calculate full name
     # reserve memory for everything in advance
-    full_array = bytearray(184)  # for full packet later
+    full_array = bytearray(184)
     full_array[:8] = wpkt.reserved
     full_array[8:40] = fid
     full_array[40:44] = seq
     full_array[44:64] = prev_mid
 
-    # fill in dmx
+    # fill in dmx value
     wpkt.dmx[:] = sha256(full_array[:64]).digest()[:7]
 
     # calculate expanded packet
@@ -149,7 +119,6 @@ def new_packet(
     # calculate full packet
     skey = SigningKey(bytes(key))
     full_array[120:] = skey.sign(bytes(full_array[:120]))
-
     wpkt.signature[:] = full_array[120:]
 
     # calculate message id
@@ -160,12 +129,19 @@ def new_packet(
 def pkt_from_wire(
     fid: bytearray, seq: bytearray, prev_mid: bytearray, pkt_wire: bytearray
 ) -> Optional[struct[PACKET]]:
+    """
+    Constructs a PACKET struct from the given wire packet (as bytearray).
+    The signature of this packet is checked. If it cannot be confirmed,
+    None is returned.
+    The check is currently skipped on pycom devices, since the pure25519
+    library is not optimized and leads to stack overflows on these devices.
+    """
     assert len(fid) == 32
     assert len(seq) == 4
     assert len(prev_mid) == 20
     assert len(pkt_wire) == 128
 
-    # start with wire packet
+    # construct WIRE_PACKET struct from bytearray
     wpkt = struct(addressof(pkt_wire), WIRE_PACKET, BIG_ENDIAN)
 
     # construct pkt
@@ -176,7 +152,7 @@ def pkt_from_wire(
     pkt.seq[:] = seq
     pkt.prev_mid[:] = prev_mid
 
-    # create block name
+    # compute block name
     full_array = bytearray(184)
     full_array[:8] = wpkt.reserved
     full_array[8:40] = fid
@@ -189,26 +165,30 @@ def pkt_from_wire(
     full_array[72:120] = wpkt.payload
 
     # verify signature
-    vkey = VerifyingKey(bytes(fid))
-    try:
-        vkey.verify(bytes(wpkt.signature), bytes(full_array[:120]))
+    if not PYCOM:
+        # do not verify on pycom devices -> stack overflow (pure25519 is not optimized)
+        vkey = VerifyingKey(bytes(fid))
+        try:
+            vkey.verify(bytes(wpkt.signature), bytes(full_array[:120]))
+        except Exception as e:
+            print(e)
+            return None
 
-        # verified packet
-        # calculate full packet
-        full_array[120:] = wpkt.signature
+    # verified packet, fill in signature
+    full_array[120:] = wpkt.signature
 
-        # calculate mid
-        bytearray_at(addressof(pkt) + 68, 20)[:] = sha256(full_array).digest()[:20]
-
-        return pkt
-
-    except Exception:
-        return None
+    # calculate mid
+    bytearray_at(addressof(pkt) + 68, 20)[:] = sha256(full_array).digest()[:20]
+    return pkt
 
 
 def create_genesis_pkt(
     fid: bytearray, payload: bytearray, skey: bytearray
 ) -> struct[PACKET]:
+    """
+    Creates an instance of a genesis packet.
+    This packet has the sequence number 1 and contains the given payload.
+    """
     seq = bytearray((1).to_bytes(4, "big"))
     pkt_type = bytearray(PLAIN48.to_bytes(1, "big"))
     return new_packet(fid, seq, fid[:20], payload, pkt_type, skey)
@@ -221,6 +201,10 @@ def create_parent_pkt(
     child_fid: bytearray,
     skey: bytearray,
 ) -> struct[PACKET]:
+    """
+    Creates an instance of a parent packet (type MKCHILD).
+    The payload of this packet contains the feed ID of the child feed.
+    """
     pkt_type = bytearray(MKCHILD.to_bytes(1, "big"))
     payload = bytearray(48)
     payload[:32] = child_fid
@@ -230,6 +214,10 @@ def create_parent_pkt(
 def create_child_pkt(
     fid: bytearray, payload: bytearray, skey: bytearray
 ) -> struct[PACKET]:
+    """
+    Creates an instance of a child packet (type ISCHILD).
+    The payload contains the feed ID of the parent feed.
+    """
     seq = bytearray((1).to_bytes(4, "big"))
     prev_mid = fid[:20]
     pkt_type = bytearray(ISCHILD.to_bytes(1, "big"))
@@ -243,6 +231,10 @@ def create_end_pkt(
     contn_fid: bytearray,
     skey: bytearray,
 ) -> struct[PACKET]:
+    """
+    Creates an instance of an "end" packet (type CONTDAS).
+    The payload contains the feed ID of the continuation feed.
+    """
     payload = bytearray(48)
     payload[:32] = contn_fid
     pkt_type = bytearray(CONTDAS.to_bytes(1, "big"))
@@ -252,6 +244,10 @@ def create_end_pkt(
 def create_contn_pkt(
     fid: bytearray, payload: bytearray, skey: bytearray
 ) -> struct[PACKET]:
+    """
+    Creates an instance of a continuation packet (type ISCONTN).
+    This packet contains the given payload.
+    """
     seq = bytearray((1).to_bytes(4, "big"))
     prev_mid = fid[:20]
     pkt_type = bytearray(ISCONTN.to_bytes(1, "big"))
@@ -266,7 +262,18 @@ def create_upd_pkt(
     v_number: bytearray,
     key: bytearray,
 ) -> struct[PACKET]:
-    assert len(file_name) < 44
+    """
+    Creates an instance of an update packet (type UPDFILE).
+    The payload of this packet contains the base version number
+    (encoded as 4 big endian bytes) and the file name of the monitored file
+    (max length 43B).
+
+     <---------- 1B -----------> <------- 4B --------> < max 43B >
+    +---------------------------+---------------------+-----------+
+    | VarInt: length(file_name) | Base Version Number | File Name |
+    +---------------------------+---------------------+-----------+
+    """
+    assert len(file_name) < 44, "file name too long: {}".format(file_name)
     payload = bytearray(48)
     fn_len = len(file_name)
     payload[:1] = to_var_int(fn_len)
@@ -284,6 +291,12 @@ def create_apply_pkt(
     update_seq: bytearray,
     key: bytearray,
 ) -> struct[PACKET]:
+    """
+    Creates an instance of an apply packet (type APPLYUP).
+    This packet contains the feed ID of the affected file feed ID and the
+    version number of the update that is being applied. This version number
+    is encoded as a 4B (big endian).
+    """
     assert len(file_fid) == 32
     assert len(update_seq) == 4
     payload = bytearray(48)
@@ -300,6 +313,10 @@ def create_chain(
     content: bytearray,
     key: bytearray,
 ) -> Tuple[struct[PACKET], List[struct[BLOB]]]:
+    """
+    Creates a blob chain containing the given payload (no size limit).
+    The chain is returned as a tuple containing: (CHAIN20 PACKET, List of blob structs).
+    """
     # prepare packet type for later
     pkt_type = CHAIN20.to_bytes(1, "big")
     content_len = len(content)
@@ -322,7 +339,7 @@ def create_chain(
     payload[:vil] = var_int
     payload[vil:28] = content[: 28 - vil]
     # update content length
-    content_len -= (28 - vil)
+    content_len -= 28 - vil
 
     # prepare blob content
     blob_content = bytearray(expected_num_blobs * 100)

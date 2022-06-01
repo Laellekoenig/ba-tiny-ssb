@@ -1,9 +1,10 @@
-from json import dumps, loads
-from ubinascii import hexlify
 from .util import listdir
+from json import dumps, loads
 from os import remove
+from ubinascii import hexlify
 
 
+# main HTML string, also contains javascript logic
 PAGE = """
 <!DOCTYPE html>
 <html>
@@ -60,6 +61,7 @@ PAGE = """
     connect();
 
     function setup() {
+        // fill empty canvas
         let canvas = document.getElementById("graph");
         let ctx = canvas.getContext("2d");
 
@@ -72,6 +74,7 @@ PAGE = """
             for (let j = 0; j < h; j++) {
                 const pixel = (j * w + i) * 4;
 
+                //rgba -> solid black
                 img.data[pixel] = 0;
                 img.data[pixel + 1] = 0;
                 img.data[pixel + 2] = 0;
@@ -83,9 +86,10 @@ PAGE = """
     }
 
     async function connect() {
+        // fetches new data every second and updates graph
         while (true) {
-
             try {
+                // request new data
                 const response = await fetch('/viz', {
                     method: 'POST',
                     body: JSON.stringify('test'),
@@ -94,6 +98,7 @@ PAGE = """
                     }
                 });
 
+                // update graph
                 response.text().then(
                     function(text) {
                         data = JSON.parse(text);
@@ -111,16 +116,20 @@ PAGE = """
     }
 
     function update_tick(data) {
+        // updates graph with given data
+
         let canvas = document.getElementById("graph");
         let ctx = canvas.getContext("2d");
+
         // clear screen
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // update tick
+        // update tick count
         const newestTick = data.ticks[data.ticks.length - 1];
         if (newestTick == undefined) newestTick = 0;
         document.getElementById("tick").innerHTML = newestTick;
 
+        // find maximum tick of all actions
         let maxTick = 0;
         for (let i = 0; i < data.fids.length; i++) {
             const fid = data.fids[i];
@@ -135,11 +144,12 @@ PAGE = """
         const height = canvas.height / data.fids.length
         const stepSize = canvas.width / maxTick;
 
-        // draw blocks
+        // draw data in graph
         for (let i = 0; i < data.fids.length; i++) {
             const fid = data.fids[i];
             const rx = data["RX:" + fid];
             const tx = data["TX:" + fid];
+            // use first 6B of feed ID as color
             const color = "#" + fid.slice(0, 6);
 
             if (rx != undefined) {
@@ -153,6 +163,7 @@ PAGE = """
     }
 
     function drawRX(ctx, points, stepSize, height, offset, color) {
+        // draws every action of a given array of ticks as a rectangle
         points.forEach(function (point, i) {
             ctx.fillStyle = color;
             ctx.fillRect(point * stepSize, height * offset, stepSize, height);
@@ -160,6 +171,7 @@ PAGE = """
     }
 
     function drawTX(ctx, points, stepSize, height, offset, color) {
+        // same as drawRX but with alpha value of 0.5 -> darker
         ctx.globalAlpha = 0.5;
         points.forEach(function (point, i) {
             ctx.fillStyle = color;
@@ -173,6 +185,10 @@ PAGE = """
 
 
 class Visualizer:
+    """
+    Tracks all registered TX/RX actions and saves them as files.
+    This data can be requested and displayed in the web GUI.
+    """
 
     def __init__(self):
         self.tick = 0
@@ -183,6 +199,9 @@ class Visualizer:
         self._load_data()
 
     def _load_data(self) -> None:
+        """
+        Loads stored data from a .json file (if it exists).
+        """
         if "viz.json" in listdir():
             f = open("viz.json")
             data_dict = loads(f.read())
@@ -192,11 +211,18 @@ class Visualizer:
             self.data = data_dict["data"]
 
     def _save_data(self) -> None:
+        """
+        Saves the current data as a .json file.
+        """
         f = open("viz.json", "w")
         f.write(dumps({"tick": self.tick, "data": self.data}))
         f.close()
 
     def reset(self) -> None:
+        """
+        Deletes and resets the data that is stored in this instance.
+        Also removes the .json file (if it exists).
+        """
         if "viz.json" in listdir():
             remove("viz.json")
         self.tick = 0
@@ -206,9 +232,15 @@ class Visualizer:
         }
 
     def get_index(self) -> str:
+        """
+        Returns a html string containing the visualizer page.
+        """
         return PAGE
 
     def register_tx(self, fid: bytearray) -> None:
+        """
+        Adds a TX action to the current feed ID and increases the tick by 1.
+        """
         str_fid = hexlify(fid).decode()
         if str_fid not in self.data["fids"]:
             self.data["fids"].append(str_fid)
@@ -224,6 +256,9 @@ class Visualizer:
         self._save_data()
 
     def register_rx(self, fid: bytearray) -> None:
+        """
+        Adds a RX action to the current feed ID and increases the tick by 1.
+        """
         str_fid = hexlify(fid).decode()
         if str_fid not in self.data["fids"]:
             self.data["fids"].append(str_fid)
@@ -240,4 +275,8 @@ class Visualizer:
         self._save_data()
 
     def get_data(self) -> str:
+        """
+        Returns the currently collected data as a json string.
+        This can be displayed on the website defined above (PAGE).
+        """
         return dumps(self.data)

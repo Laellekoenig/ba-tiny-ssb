@@ -1,13 +1,12 @@
 from ussb.feed import create_feed, create_child_feed
 from ussb.feed_manager import FeedManager
 from ussb.node import Node
-from ussb.util import listdir
+from ussb.util import listdir, PYCOM
 import os
 import sys
 
 
-def init()-> None:
-    print("fix")
+def init() -> None:
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
     master_feed = create_feed(mfid)
@@ -98,29 +97,67 @@ def clean() -> None:
         os.rmdir("_blobs")
 
 
-def main() -> int:
-    if "c" in sys.argv:
-        clean()
-        return 0
-    if "i" in sys.argv:
-        init()
-        return 0
-    if "rr" in sys.argv:
-        clean()
-        init()
-        n = Node()
-        n.io()
-    if "r" in sys.argv:
-        n = Node()
-        n.io()
-    if "w" in sys.argv:
+if PYCOM:
+    import pycom
+    from network import LoRa, WLAN
+
+    # lora setup
+    lora = LoRa(
+        mode=LoRa.LORA,
+        region=LoRa.EU868,
+        tx_power=20,
+        power_mode=LoRa.ALWAYS_ON,
+    )
+
+    lora.sf(7)
+    lora.bandwidth(LoRa.BW_250KHZ)
+    lora.coding_rate(LoRa.CODING_4_5)
+
+    def run_http() -> None:
+        # wifi setup
+        wifi = WLAN()
+        ssid = "ussb_0"
+        while wifi.scan(ssid=ssid):
+            ssid = ssid.split("_")[0] + "_" + str(int(ssid.split("_")[1]) + 1)
+
+        wifi.init(mode=WLAN.AP, ssid=ssid, auth=(WLAN.WPA2, "helloworld"))
+        pycom.heartbeat(False)
+        pycom.rgbled(0x00FF00)
         n = Node(enable_http=True)
         n.io()
-    if "e" in sys.argv:
-        init_and_export()
-        return 0
-    return 1
 
+    def run() -> None:
+        pycom.heartbeat(False)
+        pycom.rgbled(0x0000FF)
+        n = Node()
+        n.io()
 
-if __name__ == "__main__":
-    sys.exit(main())
+    run_http()
+
+else:
+
+    def main() -> int:
+        if "c" in sys.argv:
+            clean()
+            return 0
+        if "i" in sys.argv:
+            init()
+            return 0
+        if "rr" in sys.argv:
+            clean()
+            init()
+            n = Node()
+            n.io()
+        if "r" in sys.argv:
+            n = Node()
+            n.io()
+        if "w" in sys.argv:
+            n = Node(enable_http=True)
+            n.io()
+        if "e" in sys.argv:
+            init_and_export()
+            return 0
+        return 1
+
+    if __name__ == "__main__":
+        sys.exit(main())

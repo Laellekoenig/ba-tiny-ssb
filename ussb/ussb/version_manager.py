@@ -18,12 +18,12 @@ from .packet import (
     APPLYUP,
     CHAIN20,
     ISCHILD,
-    MKCHILD,
+   MKCHILD,
     UPDFILE,
-    from_var_int,
     to_var_int,
 )
-from .util import listdir, walk, create_dirs_and_file
+from .util import listdir, walk, create_dirs_and_file, PYCOM, from_var_int
+from _thread import allocate_lock
 from json import dumps, loads
 from sys import implementation
 from ubinascii import hexlify, unhexlify
@@ -46,6 +46,8 @@ class VersionManager:
         "vc_fid",
         "may_update",
         "feed_manager",
+        "update_lock",
+        "_update_next",
     )
 
     def __init__(self, feed_manager: FeedManager):
@@ -55,6 +57,8 @@ class VersionManager:
         self.apply_dict = {}
         self.update_fid = None
         self.vc_fid = None
+        self.update_lock = allocate_lock()
+        self._update_next = []
         self._load_config()
         if (
             self.update_fid is not None
@@ -80,6 +84,7 @@ class VersionManager:
             },
             "apply_dict": self.apply_dict,
             "update_fid": hexlify(self.update_fid).decode(),
+            "update_next": [(hexlify(x).decode(), y) for x, y in self._update_next],
         }
         f = open("update_cfg.json", "w")
         f.write(dumps(cfg))
@@ -112,6 +117,7 @@ class VersionManager:
 
         self.apply_dict = cfg["apply_dict"]
         self.update_fid = unhexlify((cfg["update_fid"]).encode())
+        self._update_next = [(unhexlify(x.encode()), y) for x, y in cfg["update_next"]]
 
         children = get_children(get_feed(self.update_fid))
         if len(children) > 1:
@@ -233,7 +239,12 @@ class VersionManager:
         if front_type == APPLYUP.to_bytes(1, "big"):
             payload = get_payload(get_feed(self.vc_fid), -1)
             fid, seq = payload[:32], payload[32:36]
-            self._apply_update(fid, seq)
+            # add to a queue, bodge to fix PYCOM stack overflows
+            if PYCOM:
+                with self.update_lock:
+                    self._update_next.append((fid, seq))
+            else:
+                self._apply_update(fid, seq)
 
     def _file_feed_callback(self, fid: bytearray) -> None:
         feed = get_feed(fid)
@@ -251,7 +262,11 @@ class VersionManager:
             if bytes(b_fid) in self.apply_queue:
                 # check if waiting to apply update
                 seq = self.apply_queue[b_fid]
-                self._apply_update(fid, seq.to_bytes(4, "big"))
+                if PYCOM:
+                    with self.update_lock:
+                        self._update_next.append((fid, seq.to_bytes(4, "big")))
+                else:
+                    self._apply_update(fid, seq.to_bytes(4, "big"))
 
         if front_type == MKCHILD.to_bytes(1, "big"):
             # setup of update feed finished, add to version control dictionary
@@ -523,6 +538,31 @@ class VersionManager:
         self._apply_update(fid, bytearray(v_num.to_bytes(4, "big")))
         add_apply(get_feed(self.vc_fid), fid, v_num, key)
 
+    def execute_updates(self) -> None:
+        """
+        PYCOM bodge
+        """
+        with self.update_lock:
+            # only keep newest apply for each file
+            fid_dict = {}
+            
+            while self._update_next:
+                fid, seq = self._update_next.pop(0)
+                b_fid = bytes(fid)  # bytearray can't be key of a dict
+                if b_fid in fid_dict:
+                    other_seq = fid_dict[b_fid]
+                    if other_seq < seq:
+                        fid_dict[b_fid] = seq
+                else:
+                    fid_dict[b_fid] = seq
+
+            # now apply updates
+            for b_fid in fid_dict:
+                seq = fid_dict[b_fid]
+                self._apply_update(bytearray(b_fid), seq)
+
+            self._save_config()
+
     def create_new_file(self, file_name: str) -> None:
         assert self.update_fid is not None
         print("creating new file: {}".format(file_name))
@@ -567,7 +607,7 @@ def apply_changes(content: str, changes: List[List]) -> str:
         string = change[2]
 
         # delete
-        content = content[:idx] + content[idx + len(string):]
+        content = content[:idx] + content[idx + len(string) :]
 
     for change in ins:
         idx = change[0]
@@ -711,7 +751,6 @@ def reverse_changes(changes: List[List]) -> List[List]:
     dels = [[c[0], "I", c[2]] for c in dels]
     ins = [[c[0], "D", c[2]] for c in ins]
 
-
     return ins + dels
 
 
@@ -727,9 +766,6 @@ def extract_version_graph(
         if fn_v_tuple is None:
             break
         _, minv = fn_v_tuple
-        fn_v_tuple = get_upd(current_feed)
-        assert fn_v_tuple is not None
-        _, minv = fn_v_tuple
         maxv = minv + length(current_feed) - 3  # account for ICH, UPD and MKC
 
         max_version = max(maxv, max_version)
@@ -739,9 +775,22 @@ def extract_version_graph(
             access_dict[i] = (current_feed, minv)
 
         # advance to next feed
-        parent_fid = get_parent(current_feed)
-        if parent_fid is None:
+        # parent_fid = get_parent(current_feed)
+        # if parent_fid is None:
+        # break
+
+        # above code works but: PYCOM maximum recursion depth
+        if feed.anchor_seq != 0 or feed.front_seq < 1:
             break
+
+        wire = bytearray(48)
+        f = open("_feeds/" + hexlify(current_feed.fid).decode() + ".log", "rb")
+        wire[:] = f.read(48)
+        f.close()
+
+        if wire[15:16] != ISCHILD.to_bytes(1, "big"):
+            break
+        parent_fid = wire[16:48]
 
         current_feed = get_feed(parent_fid)
         assert current_feed is not None, "failed to get parent"
