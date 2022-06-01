@@ -7,28 +7,43 @@ import sys
 
 
 def init() -> None:
+    """
+    Initiates the basic feeds of a master node.
+    """
+    # create master feed
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
     master_feed = create_feed(mfid)
 
+    # create new child feed, unassigned
     ckey, cfid = fm.generate_keypair()
     _ = create_child_feed(master_feed, mkey, cfid, ckey)
 
+    # create update feed
     ukey, ufid = fm.generate_keypair()
     update_feed = create_child_feed(master_feed, mkey, ufid, ukey)
 
+    # create version control feed
     vkey, vfid = fm.generate_keypair()
     _ = create_child_feed(update_feed, ukey, vfid, vkey)
 
+    # initiate node and version manager
     n = Node()
     n.set_master_feed(master_feed)
 
 
 def init_and_export() -> None:
+    """
+    Initiates the basic feeds of a master node.
+    Also exports the trust anchor of the master feed.
+    This can be used to initiate new nodes.
+    """
+    # create master feed
     fm = FeedManager()
     mkey, mfid = fm.generate_keypair()
     master_feed = create_feed(mfid)
 
+    # export root of master feed and configuration file, does not include key
     os.mkdir("ROOT_EXPORT")
     os.mkdir("ROOT_EXPORT/_feeds")
     for file in listdir("_feeds"):
@@ -42,18 +57,23 @@ def init_and_export() -> None:
             f.close()
             del content
 
+    # create new child feed, unassigned
     ckey, cfid = fm.generate_keypair()
     _ = create_child_feed(master_feed, mkey, cfid, ckey)
 
+    # create update feed
     ukey, ufid = fm.generate_keypair()
     update_feed = create_child_feed(master_feed, mkey, ufid, ukey)
 
+    # create version control feed
     vkey, vfid = fm.generate_keypair()
     _ = create_child_feed(update_feed, ukey, vfid, vkey)
 
+    # initiate node and version_manager
     n = Node()
     n.set_master_feed(master_feed)
 
+    # export node configuration file (containing master feed ID)
     f = open("node_cfg.json")
     content = f.read()
     f.close()
@@ -64,6 +84,9 @@ def init_and_export() -> None:
 
 
 def clean() -> None:
+    """
+    Removes all of the generated files.
+    """
     if "_feeds" in listdir():
         for file in listdir("_feeds"):
             if file.endswith(".log") or file.endswith(".head"):
@@ -83,7 +106,7 @@ def clean() -> None:
         os.remove("ROOT_EXPORT/node_cfg.json")
         os.rmdir("ROOT_EXPORT")
 
-    # FIXME
+    # FIXME: sometimes leads to exceptions (manually delete)
     if "_blobs" in listdir():
         for file in listdir("_blobs"):
             if file.startswith("."):
@@ -98,6 +121,7 @@ def clean() -> None:
 
 
 if PYCOM:
+    # pycom-specific code
     import pycom
     from network import LoRa, WLAN
 
@@ -108,33 +132,42 @@ if PYCOM:
         tx_power=20,
         power_mode=LoRa.ALWAYS_ON,
     )
-
     lora.sf(7)
     lora.bandwidth(LoRa.BW_250KHZ)
     lora.coding_rate(LoRa.CODING_4_5)
 
     def run_http() -> None:
+        """
+        Runs the node with a http server.
+        """
         # wifi setup
         wifi = WLAN()
+        # check if ssid is available, increase until unique
         ssid = "ussb_0"
         while wifi.scan(ssid=ssid):
             ssid = ssid.split("_")[0] + "_" + str(int(ssid.split("_")[1]) + 1)
 
         wifi.init(mode=WLAN.AP, ssid=ssid, auth=(WLAN.WPA2, "helloworld"))
+        print("wifi ssid: {}".format(ssid))
         pycom.heartbeat(False)
         pycom.rgbled(0x00FF00)
         n = Node(enable_http=True)
         n.io()
 
     def run() -> None:
+        """
+        Runs the node without a http server.
+        """
         pycom.heartbeat(False)
         pycom.rgbled(0x0000FF)
         n = Node()
         n.io()
 
+    # default -> with http
     run_http()
 
 else:
+    # non-pycom code, handle arguments
 
     def main() -> int:
         if "c" in sys.argv:
