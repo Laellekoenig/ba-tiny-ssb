@@ -7,10 +7,7 @@ _blobs/
 _logs/
 data/
 *.csv
-ussb_node_a/
-ussb_node_b/
-pycom_node_a/
-pycom_node_b/
+node_*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

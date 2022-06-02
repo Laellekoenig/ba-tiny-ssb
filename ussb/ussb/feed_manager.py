@@ -388,21 +388,17 @@ class FeedManager:
                     functions.append(function)
                 self._callbacks[b_fid] = functions
 
-    def remove_callback(self, fid: bytearray, function) -> None:
+    def remove_callbacks(self, fid: bytearray) -> None:
         """
-        Removes the given function from the list of registered callback functions
-        of the given feed ID.
+        Removes all callback functions of the given feed ID.
         """
         b_fid = bytes(fid)
 
         with self.callback_lock:
             if b_fid not in self._callbacks:
                 return
-
-            functions = self._callbacks[b_fid]
-            if function in functions:
-                functions.remove(function)
-            self._callbacks[b_fid] = functions
+            
+            del self._callbacks[b_fid]
 
     def append_to_feed(
         self, feed: Union[bytearray, struct[FEED]], payload: bytearray

@@ -366,16 +366,17 @@ class VersionManager:
         front_type = get_wire(feed, -1)[15:16]
 
         if front_type == MKCHILD.to_bytes(1, "big"):
+            print("switching to emergency feed")
             # new emergency update incoming
             parent_fid = get_parent(feed)
             assert parent_fid is not None, "failed to find parent"
 
             # remove callback from old feeds
-            self.feed_manager.remove_callback(parent_fid, self._file_feed_callback)
-            self.feed_manager.remove_callback(feed.fid, self._emergency_feed_callback)
+            self.feed_manager.remove_callbacks(parent_fid)
+            self.feed_manager.remove_callbacks(fid)
 
             # add callback to new feeds
-            self.feed_manager.register_callback(feed.fid, self._file_feed_callback)
+            self.feed_manager.register_callback(fid, self._file_feed_callback)
             emergency_fid = get_children(feed)[0]
             assert type(emergency_fid) is bytearray
             self.feed_manager.register_callback(
@@ -387,12 +388,14 @@ class VersionManager:
             assert fn_v_tuple is not None
             file_name, _ = fn_v_tuple
             del fn_v_tuple
+
+            del self.vc_dict[file_name]
             self.vc_dict[file_name] = (fid, emergency_fid)
             self._save_config()
 
     def _apply_update(self, fid: bytearray, seq: bytearray) -> None:
         """
-        Applies the given version number of the file monitored by the feed
+        Applies the given version number of the file, monitored by the feed
         with the given feed ID.
         """
         assert self.vc_fid is not None
@@ -401,7 +404,11 @@ class VersionManager:
         int_seq = int.from_bytes(seq, "big")
         del seq
 
-        file_feed = get_feed(fid)
+        try:
+            file_feed = get_feed(fid)
+        except Exception:
+            file_feed = None
+
         if file_feed is None:
             print("waiting for feed")
 
@@ -550,7 +557,7 @@ class VersionManager:
         maxv = base_version + length(old_feed) - 3
 
         # remove callback from old feed
-        self.feed_manager.remove_callback(old_fid, self._file_feed_callback)
+        self.feed_manager.remove_callbacks(old_fid)
         del old_fid, old_feed, fn_v_tuple
 
         # add UPDFILE packet to emergency feed, making it the new update feed
@@ -570,7 +577,7 @@ class VersionManager:
         self.add_apply(file_name, -1)  # apply latest update
 
         # update callbacks
-        self.feed_manager.remove_callback(emgcy_fid, self._emergency_feed_callback)
+        self.feed_manager.remove_callbacks(emgcy_fid)
         self.feed_manager.register_callback(emgcy_fid, self._file_feed_callback)
         self.feed_manager.register_callback(nfid, self._emergency_feed_callback)
 

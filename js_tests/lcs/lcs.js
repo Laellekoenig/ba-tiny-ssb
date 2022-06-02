@@ -1,36 +1,42 @@
 function getChanges(oldV, newV) {
-    mid = extract_lcs(oldV, newV);
+    if (oldV === newV) return [];
+
+    // get lcs string
+    mid = extractLCS(oldV, newV);
+
+    // compute insert/delete operations
     let changes = [];
 
-    console.log(oldV);
-    console.log(mid);
-    console.log(newV);
-
+    // start with delete operations -> difference to original
     let j = 0;
     for (let i = 0; i < oldV.length; i++) {
         if (oldV[i] !== mid[j]) {
+            // check for consecutive deletions
             const sIdx = i;
             let x = oldV[i];
-            while(++i < oldV.length && oldV[i] !== mid[j]) { 
+            while(++i < oldV.length && oldV[i] !== mid[j]) {
                 x = x.concat(oldV[i]);
             }
-            changes.push(['D', sIdx, x]);
+            changes.push([sIdx, 'D', x]);
             i -= 1;
             continue;
         }
         j += 1;
     }
 
+
+    // compute insert operations -> difference to update
     j = 0;
     for (let i = 0; i < newV.length; i++) {
         if (newV[i] !== mid[j]) {
+            // check for consecutive insertions
             const sIdx = i;
             let x = newV[i];
             while (++i < newV.length && newV[i] !== mid[j]) {
                 x = x.concat(newV[i]);
-            } 
+            }
 
-            changes.push(['I', sIdx, x]);
+            changes.push([sIdx, 'I', x]);
             i -= 1;
             continue;
         }
@@ -40,10 +46,15 @@ function getChanges(oldV, newV) {
     return changes;
 }
 
-function extract_lcs(s1, s2) {
-    mov = lcs_grid(s1, s2);
+function extractLCS(s1, s2) {
+    // computes the lcs of two given strings
+
+    // get grid
+    mov = getLCSGrid(s1, s2);
     let lcs = "";
 
+    // "walk" through grid
+    // 0 -> left, 1 -> diagonal, 2 -> up
     let i = s1.length - 1;
     let j = s2.length - 1;
 
@@ -64,7 +75,8 @@ function extract_lcs(s1, s2) {
     return lcs;
 }
 
-function lcs_grid(s1, s2) {
+function getLCSGrid(s1, s2) {
+    // computes the lcs grid of two strings
     const m = s1.length;
     const n = s2.length;
 

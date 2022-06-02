@@ -651,9 +651,10 @@ def length(feed: struct[FEED]) -> int:
     This is done using os.stat (1 packet is 128B).
     """
     # FIXME: use feed.front_seq and feed.anchor_seq
-    length = (
-        stat("".join(["_feeds/", hexlify(bytes(feed.fid)).decode(), ".log"]))[6] // 128
-    )
+    length = feed.front_seq - feed.anchor_seq
+    # length = (
+        # stat("".join(["_feeds/", hexlify(bytes(feed.fid)).decode(), ".log"]))[6] // 128
+    # )
     return length
 
 

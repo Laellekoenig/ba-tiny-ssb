@@ -151,7 +151,7 @@ function getChanges(oldV, newV) {
     if (oldV === newV) return [];
 
     // get lcs string
-    mid = extract_lcs(oldV, newV);
+    mid = extractLCS(oldV, newV);
 
     // compute insert/delete operations
     let changes = [];
@@ -195,12 +195,12 @@ function getChanges(oldV, newV) {
     return changes;
 }
 
-function extract_lcs(s1, s2) {
+function extractLCS(s1, s2) {
     // computes the lcs of two given strings
 
     // get grid
-    mov = lcs_grid(s1, s2);
-    let lcs = "";
+    mov = getLCSGrid(s1, s2);
+    let lcs = '';
 
     // "walk" through grid
     // 0 -> left, 1 -> diagonal, 2 -> up
@@ -224,7 +224,7 @@ function extract_lcs(s1, s2) {
     return lcs;
 }
 
-function lcs_grid(s1, s2) {
+function getLCSGrid(s1, s2) {
     // computes the lcs grid of two strings
     const m = s1.length;
     const n = s2.length;
@@ -607,23 +607,23 @@ def get_create_new_file() -> str:
         input = document.getElementById('input').value;
 
         // check if input is valid
-        if (input.includes(" ") ||
-            input === "" ||
-            input.split(".").length > 2) {
+        if (input.includes(' ') ||
+            input === '' ||
+            input.split('.').length > 2) {
 
-            alert("invalid_file_name");
+            alert('invalid_file_name');
             return;
         }
 
         // cut off starting /
-        if (input.startsWith("/")) {
+        if (input.startsWith('/')) {
             input = input.slice(1);
         }
 
         try {
             // send request to server
-            const response = await fetch("/new_file", {
-                method: "POST",
+            const response = await fetch('/new_file', {
+                method: 'POST',
                 body: JSON.stringify({
                     'file_name': input,
                 }),
@@ -707,8 +707,8 @@ def get_edit_file(file_name: str, version: int) -> str:
 <script>
 function setText() {{
     // setup set text to text area, fixes issues with TextArea
-    let txtArea = document.getElementById("code_area");
-    txtArea.value = document.getElementById("hide").textContent;
+    let txtArea = document.getElementById('code_area');
+    txtArea.value = document.getElementById('hide').textContent;
 }}
 
 async function send(emergency) {{
@@ -780,10 +780,12 @@ async function send(emergency) {{
     """
 
     # build html elements
-    reload_btn = reload("javascript:setText();")
     subtitle = "<h3 id='version_subtitle'> edit: <i>{}</i> at <i>v{}</i></h3>".format(
         file_name, version
     )
+
+    # reset button
+    reset_btn = "<a href='javascript:setText();' class='padding_link'>reset</a>"
 
     # create editor
     code_area = "<textarea id='code_area' cols=80></textarea>"
@@ -808,9 +810,9 @@ async function send(emergency) {{
     elements = [
         title,
         menu,
-        reload_btn,
         subtitle,
         return_link,
+        reset_btn,
         padding,
         send_btn,
         emergency_btn,

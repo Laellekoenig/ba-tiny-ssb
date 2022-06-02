@@ -257,9 +257,9 @@ class Node:
 
             # now actually send message
             try:
-                sock.sendto(self.this + msg, self.group)
+                sock.sendto(self.this + bytes(msg), self.group)
             except:
-                print("error send: ", type(msg))
+                print("error send: ", type(msg), " ", msg)
             sleep(0.4)
 
     def _lora_loop(self, sock: socket) -> None:
@@ -279,7 +279,7 @@ class Node:
             # send message
             if msg:
                 try:
-                    sock.send(msg)
+                    sock.send(bytes(msg))
                 except Exception:
                     print("failed to send")
 
