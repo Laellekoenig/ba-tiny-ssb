@@ -2,7 +2,8 @@
 Implementation of the [tinyssb](https://github.com/tschudin/tinyssb) protocol
 with a web GUI and version control system. The code is written in micropython
 and cannot be run using regular Python. Also works on Pycom devices that support
-LoRa and wifi connectivity.
+LoRa and wifi connectivity. The validation of the signature on pycom devices is
+skipped, since the pure25519 library is not optimized them (leads to stack overflows).
 
 ## UNIX Setup
 1. Copy the contents of the `ussb` directory into a new node directory.
