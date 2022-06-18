@@ -1,11 +1,11 @@
 # Distributing and Managing Software Updates Using Append-only Logs
-Implementation of the [tinyssb](https://github.com/tschudin/tinyssb) protocol
-with a web GUI and versioning system. The code is written in micropython
-and cannot be run using regular Python. Also works on Pycom devices that support
-LoRa and wifi connectivity. The validation of the signature on Pycom devices is
-skipped, since the pure25519 library is not optimized them (leads to stack overflows).
-The web GUI was only tested in Mozilla Firefox and may behave differently in other
-browsers.
+This is an implementation of the [tinyssb](https://github.com/tschudin/tinyssb)
+protocol with the addition of a web GUI and a versioning system. The code is
+written in micropython and cannot be run using regular Python. Also works on
+Pycom devices that support LoRa and WiFi connectivity. The validation of the
+signature on Pycom devices is skipped, since the pure25519 library is not
+optimized for them (leads to stack overflows). The web GUI was only tested in
+Mozilla Firefox and may behave differently in other browsers.
 
 ## UNIX Setup
 1. Copy the contents of the `ussb` directory into a new node directory.
