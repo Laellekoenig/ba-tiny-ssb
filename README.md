@@ -26,7 +26,7 @@ A node can be reset by running `micropython main.py c`.
 (192.168.4.1:80 when connected to wifi of pycom device).
 
 It is also possible to run `micropython main.py i` (initialize) on the admin node
-and copying every file but `fm_config.json` to the other nodes. This way, nodes
+to copy every file but `fm_config.json` to the other nodes. This way, devices
 do not have to catch up with the admin node at first.
 
 ## Screenshots
