@@ -108,10 +108,21 @@ class VersionManager:
             self.vc_dict = {}
             self.apply_queue = {}
             self.apply_dict = {}
+            self._update_next = []
             return
 
         f = open(fn)
-        cfg = loads(f.read())
+        cfg_str = f.read()
+
+        # check if configuration is empty
+        if cfg_str == "":
+            self.vc_dict = {}
+            self.apply_queue = {}
+            self.apply_dict = {}
+            self._update_next = []
+            return
+
+        cfg = loads(cfg_str)
         f.close()
 
         self.vc_dict = {
@@ -197,7 +208,7 @@ class VersionManager:
 
                 # save to version control dictionary
                 self.vc_dict[f] = (cfid, efid)
-                print(f, "---", hexlify(cfid).decode())
+                # print(f, "---", hexlify(cfid).decode())
                 self.apply_dict[f] = 0  # no updates applied yet
                 self._save_config()
 
@@ -259,6 +270,7 @@ class VersionManager:
         # new file update feed
         new_fid = children[-1]
         assert type(new_fid) is bytearray
+        print("registering a new file feed callback for")
         self.feed_manager.register_callback(new_fid, self._file_feed_callback)
 
     def _vc_feed_callback(self, fid: bytearray) -> None:
@@ -344,6 +356,7 @@ class VersionManager:
             assert fn_v_tuple is not None
 
             file_name, _ = fn_v_tuple
+            print("file name arrived: {}".format(file_name))
 
             # create file if it does not exist
             if file_name not in walk():

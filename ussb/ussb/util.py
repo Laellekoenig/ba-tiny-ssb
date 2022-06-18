@@ -9,7 +9,7 @@ if implementation.name != "micropython":
 
 # detect if the code is running on a pycom device
 PYCOM = False
-if platform in ("FiPy", "LoPy"):
+if platform in ("FiPy", "LoPy4"):
     PYCOM = True
     from os import listdir as oslistdir
 else:

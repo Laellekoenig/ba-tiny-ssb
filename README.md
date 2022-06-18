@@ -1,8 +1,8 @@
-# Distributing updates via append-only logs
+# Distributing and Managing Software Updates Using Append-only Logs
 Implementation of the [tinyssb](https://github.com/tschudin/tinyssb) protocol
-with a web GUI and version control system. The code is written in micropython
+with a web GUI and versioning system. The code is written in micropython
 and cannot be run using regular Python. Also works on Pycom devices that support
-LoRa and wifi connectivity. The validation of the signature on pycom devices is
+LoRa and wifi connectivity. The validation of the signature on Pycom devices is
 skipped, since the pure25519 library is not optimized them (leads to stack overflows).
 
 ## UNIX Setup

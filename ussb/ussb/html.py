@@ -798,7 +798,7 @@ async function send(emergency) {{
     emergency_btn = (
         "<a href='javascript:void(0);' onclick='send(true)' class='padding_link'>"
     )
-    emergency_btn += "add_and_apply"
+    emergency_btn += "add_emergency_update"
     emergency_btn += "</a>"
 
     return_link = "<a href='javascript:location.reload();' class='padding_link'>"
