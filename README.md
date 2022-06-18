@@ -19,11 +19,11 @@ the trust anchor into the directory `ROOT_EXPORT`.
 
 A node can be reset by running `micropython main.py c`.
 
-## PYCOM Setup
+## Pycom Setup
 1. Follow the first three steps of the **UNIX Setup**.
 2. Copy the contents of each node directory to a pycom device (must have LoRa and wifi).
 3. The node is automatically started on power up. The http server is enabled by default
-(192.168.4.1:80 when connected to wifi of pycom device).
+(192.168.4.1:80 when connected to WiFi of the Pycom device).
 
 It is also possible to run `micropython main.py i` (initialize) on the admin node
 to copy every file but `fm_config.json` to the other nodes. This way, devices
